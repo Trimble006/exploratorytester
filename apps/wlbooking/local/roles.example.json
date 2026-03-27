@@ -1,0 +1,19 @@
+{
+  "roles": [
+    {
+      "name": "admin",
+      "identifierType": "email",
+      "identifier": "admin@example.com",
+      "password": "admin-password",
+      "contextFile": "./apps/wlbooking/local/admin-context.md",
+      "historicalBugReportsFile": "./apps/wlbooking/local/admin-historical-bugs.md"
+    },
+    {
+      "name": "member",
+      "username": "member01",
+      "password": "member-password",
+      "contextFile": "./apps/wlbooking/local/member-context.md",
+      "historicalBugReportsFile": "./apps/wlbooking/local/member-historical-bugs.md"
+    }
+  ]
+}

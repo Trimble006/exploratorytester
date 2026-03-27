@@ -1,0 +1,28 @@
+{
+  "roles": [
+    {
+      "name": "platform admin",
+      "identifierType": "email",
+      "identifier": "admin@wlbooking.com",
+      "password": "admin123",
+      "contextFile": "",
+      "historicalBugReportsFile": ""
+    },
+    {
+      "name": "tenant admin",
+      "identifierType": "email",
+      "identifier": "admin@lakeview.club",
+      "password": "club123",
+      "contextFile": "",
+      "historicalBugReportsFile": ""
+    },
+    {
+      "name": "user",
+      "identifierType": "email",
+      "identifier": "user@lakeview.club",
+      "password": "user123",
+      "contextFile": "",
+      "historicalBugReportsFile": ""
+    }
+  ]
+}

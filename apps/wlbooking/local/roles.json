@@ -1,0 +1,11 @@
+{
+  "roles": [
+    {
+      "name": "admin",
+      "identifierType": "email",
+      "identifier": "superadmin@wlbooking.com",
+      "password": "super123",
+      "contextFile": "./apps/wlbooking/local/admin-context.md"
+    }
+  ]
+}

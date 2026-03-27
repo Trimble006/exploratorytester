@@ -1,0 +1,10 @@
+{
+  "provider": "github",
+  "enabled": true,
+  "repo": "Trimble006/Bookingplatform",
+  "tokenEnv": "GITHUB_TOKEN",
+  "labels": ["exploratory-test", "auto-filed"],
+  "titlePrefix": "[Exploratory]",
+  "dedupeByTitle": true,
+  "dryRun": true
+}

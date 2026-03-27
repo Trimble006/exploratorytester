@@ -1,0 +1,11 @@
+{
+  "_comment": "In app-scoped mode, place this file at apps/<app>/<profile>/issue-tracker.github.json or set ISSUE_TRACKER_CONFIG_FILE explicitly.",
+  "provider": "github",
+  "enabled": true,
+  "repo": "owner/repo",
+  "tokenEnv": "GITHUB_TOKEN",
+  "labels": ["exploratory-test", "auto-filed"],
+  "titlePrefix": "[Exploratory]",
+  "dedupeByTitle": true,
+  "dryRun": false
+}

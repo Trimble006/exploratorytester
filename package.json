@@ -22,7 +22,16 @@
   },
   "homepage": "https://github.com/Trimble006/exploratorytester#readme",
   "devDependencies": {
+    "@types/log-update": "^2.0.0",
     "@types/node": "^25.5.0",
     "typescript": "^6.0.2"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@playwright/mcp": "^0.0.68",
+    "chalk": "^4.1.2",
+    "dotenv": "^17.3.1",
+    "log-update": "^4.0.0"
   }
 }

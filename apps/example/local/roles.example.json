@@ -1,0 +1,19 @@
+{
+  "roles": [
+    {
+      "name": "admin",
+      "identifierType": "email",
+      "identifier": "admin@example.com",
+      "password": "admin-password",
+      "contextFile": "./apps/<app>/<profile>/admin-context.md",
+      "historicalBugReportsFile": "./apps/<app>/<profile>/admin-historical-bugs.md"
+    },
+    {
+      "name": "member",
+      "username": "member01",
+      "password": "member-password",
+      "contextFile": "./apps/<app>/<profile>/member-context.md",
+      "historicalBugReportsFile": "./apps/<app>/<profile>/member-historical-bugs.md"
+    }
+  ]
+}
