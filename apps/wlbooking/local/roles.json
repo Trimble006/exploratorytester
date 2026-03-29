@@ -5,7 +5,7 @@
       "identifierType": "email",
       "identifier": "superadmin@wlbooking.com",
       "password": "super123",
-      "contextFile": "./apps/wlbooking/local/admin-context.md"
+      "contextFile": "./apps/wlbooking/local/context/admin-context.md"
     }
   ]
 }

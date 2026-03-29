@@ -29,9 +29,11 @@ export interface IssueTestParams {
 
 export interface IssueBodyOverrides {
   targetUrl?: string;
+  environment?: string;
   appProfile?: string;
   maxIterations?: number;
   concurrency?: number;
+  interleave?: boolean;
   roles?: string;
   [key: string]: unknown;
 }
@@ -190,6 +192,48 @@ function extractPrefixedLabel(
   return match ? match.slice(prefix.length).trim() || undefined : undefined;
 }
 
+function parsePlainTextOverrides(body: string): IssueBodyOverrides {
+  const overrides: IssueBodyOverrides = {};
+  const lower = body.toLowerCase();
+
+  // URL: match http:// or https:// URLs
+  const urlMatch = body.match(/https?:\/\/[^\s,)>"']+/i);
+  if (urlMatch) {
+    overrides.targetUrl = urlMatch[0];
+  }
+
+  // Iterations: "20 iterations", "iterations: 20", "max iterations 20"
+  const iterMatch = lower.match(/(?:max\s+)?iterations[\s:]*(\d+)|(\d+)\s+iterations/);
+  if (iterMatch) {
+    overrides.maxIterations = parseInt(iterMatch[1] ?? iterMatch[2], 10);
+  }
+
+  // Concurrency: "2 concurrent", "concurrency: 2", "2 agents"
+  const concurrencyMatch = lower.match(/concurren(?:cy|t)[\s:]*(\d+)|(\d+)\s+concurrent|(\d+)\s+agents?/);
+  if (concurrencyMatch) {
+    overrides.concurrency = parseInt(concurrencyMatch[1] ?? concurrencyMatch[2] ?? concurrencyMatch[3], 10);
+  }
+
+  // Profile: "profile: local", "app profile local"
+  const profileMatch = lower.match(/(?:app\s+)?profile[\s:]+([a-z0-9_-]+)/);
+  if (profileMatch) {
+    overrides.appProfile = profileMatch[1];
+  }
+
+  // Interleave: "interleave", "interleaved"
+  if (/\binterleave[d]?\b/i.test(lower)) {
+    overrides.interleave = true;
+  }
+
+  // Environment: "run on dev", "environment: prod", "env: test", "on staging"
+  const envMatch = lower.match(/(?:run\s+on|environment|env)[\s:]+([a-z0-9_-]+)/);
+  if (envMatch) {
+    overrides.environment = envMatch[1];
+  }
+
+  return overrides;
+}
+
 function parseJsonBlock(body: string): IssueBodyOverrides {
   // Try fenced ```json block first
   const fencedMatch = body.match(/```(?:json)?\s*\n([\s\S]*?)```/);
@@ -203,19 +247,19 @@ function parseJsonBlock(body: string): IssueBodyOverrides {
     }
   }
 
-  if (!jsonString) {
-    return {};
+  if (jsonString) {
+    try {
+      const parsed = JSON.parse(jsonString.trim());
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        return parsed as IssueBodyOverrides;
+      }
+    } catch {
+      // JSON parse failed — fall through to plain-text extraction
+    }
   }
 
-  try {
-    const parsed = JSON.parse(jsonString.trim());
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-      return parsed as IssueBodyOverrides;
-    }
-  } catch {
-    console.warn("Warning: could not parse JSON config block from issue body.");
-  }
-  return {};
+  // Plain-text pattern matching fallback
+  return parsePlainTextOverrides(body);
 }
 
 // ---------------------------------------------------------------------------

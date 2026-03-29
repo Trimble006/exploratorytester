@@ -1,0 +1,9 @@
+{
+  "default": "local",
+  "environments": {
+    "local": "http://localhost:3000",
+    "dev": "",
+    "test": "",
+    "prod": ""
+  }
+}

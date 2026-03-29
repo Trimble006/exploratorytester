@@ -1,8 +1,8 @@
 import * as dotenv from "dotenv";
-import { access, mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile, readdir, appendFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { McpClient } from "./mcp-client.js";
-import { runAgent, AgentSession, type AppContext, type TestCredentials } from "./agent.js";
+import { runAgent, AgentSession, type AppContext, type TestCredentials, type TokenUsage } from "./agent.js";
 import {
   parseIssueArg,
   fetchIssueTestParams,
@@ -117,8 +117,15 @@ interface AppProfileDefaults {
   issueTrackerConfigFile?: string;
   appContextFile?: string;
   historicalBugReportsFile?: string;
+  environmentsConfigFile?: string;
+  environments?: EnvironmentsConfig;
   resultsDir?: string;
   recentIssuesContext?: string;
+}
+
+interface EnvironmentsConfig {
+  default?: string;
+  environments: Record<string, string>;
 }
 
 function normalizeAppKey(input: string): string {
@@ -127,6 +134,65 @@ function normalizeAppKey(input: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+interface TokenUsageLogEntry {
+  ts: string;
+  runId: string;
+  url: string;
+  model: string;
+  role: string;
+  prompt: number;
+  output: number;
+  cached: number;
+  total: number;
+}
+
+async function appendTokenUsageEntry(filePath: string, entry: TokenUsageLogEntry): Promise<void> {
+  try {
+    await appendFile(filePath, JSON.stringify(entry) + "\n", "utf-8");
+  } catch {
+    // non-fatal
+  }
+}
+
+async function readLifetimeTokenStats(filePath: string): Promise<{
+  total: TokenUsage;
+  runCount: number;
+  roleCount: number;
+}> {
+  const zero: TokenUsage = { promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 };
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    const lines = raw.split("\n").filter(Boolean);
+    const runIds = new Set<string>();
+    let roleCount = 0;
+    const total: TokenUsage = { ...zero };
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as TokenUsageLogEntry;
+        total.promptTokens += entry.prompt;
+        total.outputTokens += entry.output;
+        total.cachedTokens += entry.cached;
+        total.totalTokens += entry.total;
+        runIds.add(entry.runId);
+        roleCount++;
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return { total, runCount: runIds.size, roleCount };
+  } catch {
+    return { total: zero, runCount: 0, roleCount: 0 };
+  }
+}
+
+function estimateCost(usage: TokenUsage): string {
+  // Gemini 2.0 Flash approximate pricing — verify at https://ai.google.dev/pricing
+  const inputCost = (usage.promptTokens / 1_000_000) * 0.075;
+  const outputCost = (usage.outputTokens / 1_000_000) * 0.30;
+  const total = inputCost + outputCost;
+  return `~$${total.toFixed(4)} (input: $${inputCost.toFixed(4)}, output: $${outputCost.toFixed(4)}) [approx]`;
 }
 
 async function tryResolveExistingFile(filePath: string): Promise<string | undefined> {
@@ -204,12 +270,29 @@ async function resolveAppProfileDefaults(): Promise<AppProfileDefaults> {
     issueTrackerConfigFile,
     appContextFile,
     historicalBugReportsFile,
+    environmentsConfigFile,
   ] = await Promise.all([
     tryResolveExistingFile(join(appRootDir, "roles.json")),
     tryResolveExistingFile(join(appRootDir, "issue-tracker.github.json")),
-    tryResolveExistingFile(join(appRootDir, "app-context.md")),
-    tryResolveExistingFile(join(appRootDir, "historical-bugs.md")),
+    tryResolveExistingFile(join(appRootDir, "context", "app-context.md")),
+    tryResolveExistingFile(join(appRootDir, "context", "historical-bugs.md")),
+    tryResolveExistingFile(join(appRootDir, "environments.json")),
   ]);
+
+  let environments: EnvironmentsConfig | undefined;
+  if (environmentsConfigFile) {
+    try {
+      const raw = JSON.parse(await readFile(environmentsConfigFile, "utf-8"));
+      if (raw.environments && typeof raw.environments === "object") {
+        environments = {
+          default: raw.default,
+          environments: raw.environments,
+        };
+      }
+    } catch {
+      console.warn(`Warning: could not parse environments config: ${environmentsConfigFile}`);
+    }
+  }
 
   return {
     enabled: true,
@@ -221,6 +304,8 @@ async function resolveAppProfileDefaults(): Promise<AppProfileDefaults> {
     issueTrackerConfigFile,
     appContextFile,
     historicalBugReportsFile,
+    environmentsConfigFile,
+    environments,
     resultsDir: join(appRootDir, "outputs"),
   };
 }
@@ -947,6 +1032,7 @@ function toMarkdownReport(result: {
   contextSource?: string;
   finalReport: string;
   transcript: string[];
+  tokenUsage: TokenUsage;
 }, appProfileDefaults?: AppProfileDefaults): string {
   const lines: string[] = [];
   lines.push("# Exploratory Test Report");
@@ -967,6 +1053,13 @@ function toMarkdownReport(result: {
   if (result.contextSource) {
     lines.push(`- App Context Source: ${result.contextSource}`);
   }
+  lines.push(`- Prompt Tokens: ${result.tokenUsage.promptTokens.toLocaleString()}`);
+  lines.push(`- Output Tokens: ${result.tokenUsage.outputTokens.toLocaleString()}`);
+  if (result.tokenUsage.cachedTokens > 0) {
+    lines.push(`- Cached Tokens: ${result.tokenUsage.cachedTokens.toLocaleString()}`);
+  }
+  lines.push(`- Total Tokens: ${result.tokenUsage.totalTokens.toLocaleString()}`);
+  lines.push(`- Estimated Cost: ${estimateCost(result.tokenUsage)}`);
   lines.push("");
   lines.push("## Final Report");
   lines.push("");
@@ -1071,6 +1164,32 @@ function toCombinedSummaryMarkdown(params: {
   }
   lines.push("");
 
+  const runTokenAgg: TokenUsage = { promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 };
+  for (const o of successful) {
+    if (o.result?.tokenUsage) {
+      runTokenAgg.promptTokens += o.result.tokenUsage.promptTokens;
+      runTokenAgg.outputTokens += o.result.tokenUsage.outputTokens;
+      runTokenAgg.cachedTokens += o.result.tokenUsage.cachedTokens;
+      runTokenAgg.totalTokens += o.result.tokenUsage.totalTokens;
+    }
+  }
+  lines.push("## Token Usage");
+  lines.push("");
+  lines.push("| Role | Prompt | Output | Cached | Total |");
+  lines.push("|------|--------|--------|--------|-------|");
+  for (const o of successful) {
+    if (o.result?.tokenUsage) {
+      const u = o.result.tokenUsage;
+      lines.push(`| ${o.role.name} | ${u.promptTokens.toLocaleString()} | ${u.outputTokens.toLocaleString()} | ${u.cachedTokens.toLocaleString()} | ${u.totalTokens.toLocaleString()} |`);
+    }
+  }
+  if (successful.length > 1) {
+    lines.push(`| **Total** | **${runTokenAgg.promptTokens.toLocaleString()}** | **${runTokenAgg.outputTokens.toLocaleString()}** | **${runTokenAgg.cachedTokens.toLocaleString()}** | **${runTokenAgg.totalTokens.toLocaleString()}** |`);
+  }
+  lines.push("");
+  lines.push(`**Estimated cost (this run):** ${estimateCost(runTokenAgg)}`);
+  lines.push("");
+
   lines.push("## Final Report Excerpts");
   lines.push("");
   for (const outcome of successful) {
@@ -1173,10 +1292,16 @@ async function main(): Promise<void> {
       process.env.MAX_CONCURRENT_AGENTS = String(issueParams.overrides.concurrency);
       console.log(`IssueOps: MAX_CONCURRENT_AGENTS overridden to ${issueParams.overrides.concurrency}`);
     }
+    if (issueParams.overrides.interleave !== undefined) {
+      process.env.INTERLEAVE_ROLES = issueParams.overrides.interleave ? "true" : "false";
+      console.log(`IssueOps: INTERLEAVE_ROLES overridden to ${issueParams.overrides.interleave}`);
+    }
   }
 
   // ── Resolve target URL ──
-  // Priority: issue body override > positional CLI arg (skip --issue and its value)
+  // Priority: issue explicit URL > CLI positional arg > issue environment name > default environment
+  const appProfileDefaults = await resolveAppProfileDefaults();
+
   let targetArg: string | undefined = issueParams?.overrides.targetUrl;
   if (!targetArg) {
     const positionalArgs = process.argv.slice(2).filter((a) => {
@@ -1186,9 +1311,22 @@ async function main(): Promise<void> {
     });
     targetArg = positionalArgs[0];
   }
+  // Resolve from environments config
+  if (!targetArg && appProfileDefaults.environments) {
+    const envName = issueParams?.overrides.environment ?? appProfileDefaults.environments.default;
+    if (envName) {
+      const url = appProfileDefaults.environments.environments[envName];
+      if (url) {
+        targetArg = url;
+        console.log(`Resolved target URL from environment "${envName}": ${url}`);
+      } else if (envName) {
+        console.warn(`Warning: environment "${envName}" has no URL configured in environments.json`);
+      }
+    }
+  }
   if (!targetArg) {
     console.error("Usage: npm start -- <url>");
-    console.error("   or: npm start -- --issue=123  (with targetUrl in issue JSON block)");
+    console.error("   or: npm start -- --issue=123  (with targetUrl or environment in issue)");
     console.error("   or: npm start -- --issue=123 <url>");
     console.error("Example: npm start -- https://example.com");
     process.exit(1);
@@ -1206,7 +1344,6 @@ async function main(): Promise<void> {
 
   const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
   const maxIterations = parseInt(process.env.MAX_ITERATIONS ?? "50", 10);
-  const appProfileDefaults = await resolveAppProfileDefaults();
 
   const resultsBaseDir = process.env.RESULTS_DIR?.trim() || appProfileDefaults.resultsDir || "results";
   const recentIssues = await getMostRecentIssues(resultsBaseDir, safeHostForFilename(targetUrl));
@@ -1227,11 +1364,29 @@ async function main(): Promise<void> {
   console.log(`Resolved ${roles.length} role(s).`);
   console.log(`Using concurrency limit: ${concurrencyLimit}`);
 
+  const tokenUsageLogPath = join(resultsBaseDir, "token-usage.ndjson");
+  let cleanupRunId = "";
+  let interleaveSessionsForCleanup: Array<{ roleName: string; session: AgentSession }> = [];
   const activeClients = new Set<McpClient>();
 
   // Graceful shutdown
   const cleanup = async () => {
     console.log("\nShutting down...");
+    for (const { session } of interleaveSessionsForCleanup) {
+      if (session.iterationsExecuted > 0) {
+        await appendTokenUsageEntry(tokenUsageLogPath, {
+          ts: new Date().toISOString(),
+          runId: `${cleanupRunId}-interrupted`,
+          url: session.options.targetUrl,
+          model: session.options.model,
+          role: session.options.roleName,
+          prompt: session.tokenUsage.promptTokens,
+          output: session.tokenUsage.outputTokens,
+          cached: session.tokenUsage.cachedTokens,
+          total: session.tokenUsage.totalTokens,
+        });
+      }
+    }
     await Promise.all(
       Array.from(activeClients).map(async (client) => {
         try {
@@ -1251,6 +1406,7 @@ async function main(): Promise<void> {
     await mkdir(resultsBaseDir, { recursive: true });
 
     const reportTimestamp = timestampForFilename(new Date());
+    cleanupRunId = reportTimestamp;
     const hostPart = safeHostForFilename(targetUrl);
     const runScopeDir = join(resultsBaseDir, hostPart, reportTimestamp);
     const roleResultsDir = join(runScopeDir, "role-reports");
@@ -1309,6 +1465,7 @@ async function main(): Promise<void> {
         }
       }
 
+      interleaveSessionsForCleanup = sessions;
             // Interleaved Turn Phase
       for (let iter = 1; iter <= maxIterations; iter++) {
         let anyActive = false;
@@ -1332,11 +1489,23 @@ async function main(): Promise<void> {
       if (process.env.VERBOSE !== "true") logUpdate.clear();
 
       // Teardown and Format Results
+      interleaveSessionsForCleanup = [];
       for (let i = 0; i < roles.length; i++) {
         const matchingSession = sessions.find(s => s.roleName === roles[i].name);
         if (matchingSession && !interleavedResults[i]) {
           try {
             const finalized = matchingSession.session.finalize();
+            await appendTokenUsageEntry(tokenUsageLogPath, {
+              ts: new Date().toISOString(),
+              runId: reportTimestamp,
+              url: targetUrl,
+              model: finalized.model,
+              role: finalized.roleName,
+              prompt: finalized.tokenUsage.promptTokens,
+              output: finalized.tokenUsage.outputTokens,
+              cached: finalized.tokenUsage.cachedTokens,
+              total: finalized.tokenUsage.totalTokens,
+            });
             interleavedResults[i] = { status: "fulfilled", value: finalized };
           } catch (err) {
             interleavedResults[i] = { status: "rejected", reason: err };
@@ -1381,6 +1550,17 @@ async function main(): Promise<void> {
               maxIterations,
               testCredentials: role.testCredentials,
               appContext,
+            });
+            await appendTokenUsageEntry(tokenUsageLogPath, {
+              ts: new Date().toISOString(),
+              runId: reportTimestamp,
+              url: targetUrl,
+              model: result.model,
+              role: result.roleName,
+              prompt: result.tokenUsage.promptTokens,
+              output: result.tokenUsage.outputTokens,
+              cached: result.tokenUsage.cachedTokens,
+              total: result.tokenUsage.totalTokens,
             });
             return result;
           } finally {
@@ -1427,6 +1607,16 @@ async function main(): Promise<void> {
           resultPath: reportPath,
           error: errorMessage,
         });
+      }
+    }
+
+    const runTokenUsage: TokenUsage = { promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 };
+    for (const o of outcomes) {
+      if (o.status === "success" && o.result?.tokenUsage) {
+        runTokenUsage.promptTokens += o.result.tokenUsage.promptTokens;
+        runTokenUsage.outputTokens += o.result.tokenUsage.outputTokens;
+        runTokenUsage.cachedTokens += o.result.tokenUsage.cachedTokens;
+        runTokenUsage.totalTokens += o.result.tokenUsage.totalTokens;
       }
     }
 
@@ -1484,6 +1674,11 @@ async function main(): Promise<void> {
     await writeFile(combinedPath, combinedMarkdown, "utf-8");
     console.log(`Combined summary written: ${combinedPath}`);
 
+    const lifetimeStats = await readLifetimeTokenStats(tokenUsageLogPath);
+    console.log(`\nToken usage (this run): prompt=${runTokenUsage.promptTokens.toLocaleString()}, output=${runTokenUsage.outputTokens.toLocaleString()}, cached=${runTokenUsage.cachedTokens.toLocaleString()}, total=${runTokenUsage.totalTokens.toLocaleString()} | est. cost: ${estimateCost(runTokenUsage)}`);
+    console.log(`Lifetime totals (${lifetimeStats.runCount} run(s), ${lifetimeStats.roleCount} role(s)): total=${lifetimeStats.total.totalTokens.toLocaleString()} tokens | est. lifetime cost: ${estimateCost(lifetimeStats.total)}`);
+    console.log(`Token log: ${tokenUsageLogPath}`);
+
     // ── IssueOps: post summary comment and swap labels ──
     if (issueOpsConfig && issueParams) {
       try {
@@ -1505,6 +1700,13 @@ async function main(): Promise<void> {
           appProfileDefaults.appVersion ? `| Version | ${appProfileDefaults.appVersion} |` : null,
           `| Roles | ${outcomes.length} (${outcomes.length - failedCount} succeeded, ${failedCount} failed) |`,
           `| Model | ${model} |`,
+          `| Prompt Tokens | ${runTokenUsage.promptTokens.toLocaleString()} |`,
+          `| Output Tokens | ${runTokenUsage.outputTokens.toLocaleString()} |`,
+          runTokenUsage.cachedTokens > 0 ? `| Cached Tokens | ${runTokenUsage.cachedTokens.toLocaleString()} |` : null,
+          `| Total Tokens | ${runTokenUsage.totalTokens.toLocaleString()} |`,
+          `| Est. Cost (this run) | ${estimateCost(runTokenUsage)} |`,
+          ``,
+          `**Lifetime totals** (${lifetimeStats.runCount} run(s), ${lifetimeStats.roleCount} role(s)): ${lifetimeStats.total.totalTokens.toLocaleString()} tokens — est. ${estimateCost(lifetimeStats.total)}`,
           ``,
           `**Report:** \`${combinedPath}\``,
         ].filter(Boolean).join("\n");

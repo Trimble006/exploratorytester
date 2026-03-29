@@ -7,6 +7,12 @@ import {
 } from "@google/generative-ai";
 import { McpClient } from "./mcp-client.js";
 
+export interface TokenUsage {
+  promptTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedTokens: number;
+}
 
 const isVerbose = process.env.VERBOSE === "true";
 export function vlog(...args: any[]) {
@@ -195,6 +201,7 @@ export interface AgentRunResult {
   contextSource?: string;
   finalReport: string;
   transcript: string[];
+  tokenUsage: TokenUsage;
 }
 
 export class AgentSession {
@@ -216,6 +223,7 @@ export class AgentSession {
   public finalReport = "No final report produced.";
   public iterationsExecuted = 0;
   public lastAction = "Initializing...";
+  public tokenUsage: TokenUsage = { promptTokens: 0, outputTokens: 0, totalTokens: 0, cachedTokens: 0 };
 
   constructor(options: AgentOptions) {
     this.options = options;
@@ -297,6 +305,13 @@ export class AgentSession {
     }
 
     const response = result.response;
+    const meta = response.usageMetadata;
+    if (meta) {
+      this.tokenUsage.promptTokens += meta.promptTokenCount ?? 0;
+      this.tokenUsage.outputTokens += meta.candidatesTokenCount ?? 0;
+      this.tokenUsage.totalTokens += meta.totalTokenCount ?? 0;
+      this.tokenUsage.cachedTokens += meta.cachedContentTokenCount ?? 0;
+    }
     const functionCalls = response.functionCalls();
     let textResponse: string | undefined;
 
@@ -411,6 +426,7 @@ export class AgentSession {
       contextSource: this.contextSource,
       finalReport: this.finalReport,
       transcript: this.transcript,
+      tokenUsage: this.tokenUsage,
     };
   }
 }
@@ -440,6 +456,13 @@ export async function runAgent(options: AgentOptions): Promise<AgentRunResult> {
         transcript: session.transcript,
       });
       const response = result.response;
+      const forcedMeta = response.usageMetadata;
+      if (forcedMeta) {
+        session.tokenUsage.promptTokens += forcedMeta.promptTokenCount ?? 0;
+        session.tokenUsage.outputTokens += forcedMeta.candidatesTokenCount ?? 0;
+        session.tokenUsage.totalTokens += forcedMeta.totalTokenCount ?? 0;
+        session.tokenUsage.cachedTokens += forcedMeta.cachedContentTokenCount ?? 0;
+      }
       let textResponse: string | undefined;
       try {
         textResponse = response.text();
