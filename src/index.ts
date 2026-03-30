@@ -995,6 +995,66 @@ async function resolveIssueTrackerConfig(
   };
 }
 
+async function fetchGithubOpenIssues(
+  config: GithubIssueTrackerConfig
+): Promise<string | undefined> {
+  const token = envValue(config.tokenEnv);
+  if (!token) {
+    console.warn(
+      `[github-issues] Skipping GitHub issue fetch: token env var ${config.tokenEnv} is not set.`
+    );
+    return undefined;
+  }
+
+  try {
+    const { owner, name } = parseRepo(config.repo);
+    const labelFilter = (config.labels ?? []).join(",");
+    const url = `/repos/${owner}/${name}/issues?state=open&per_page=50${
+      labelFilter ? `&labels=${encodeURIComponent(labelFilter)}` : ""
+    }`;
+
+    const response = await githubRequest(url, token, { method: "GET" });
+    if (!response.ok) {
+      console.warn(
+        `[github-issues] GitHub issue fetch failed (${response.status}). Skipping.`
+      );
+      return undefined;
+    }
+
+    const issues = (await response.json()) as Array<{
+      number: number;
+      title: string;
+      body: string | null;
+      labels: Array<{ name: string }>;
+    }>;
+
+    if (!issues.length) return undefined;
+
+    const lines = [`### Known Open Issues (from GitHub: ${config.repo})`];
+    for (const issue of issues) {
+      const severityLabel = issue.labels
+        .map((l) => l.name)
+        .find((n) => n.startsWith("severity:"));
+      const severity = severityLabel
+        ? severityLabel.replace("severity:", "").toUpperCase()
+        : "UNKNOWN";
+      lines.push(`- [${severity}] #${issue.number}: ${issue.title}`);
+      const bodyExcerpt = issue.body?.trim().slice(0, 300);
+      if (bodyExcerpt) {
+        lines.push(`  ${bodyExcerpt.replace(/\n/g, " ")}`);
+      }
+    }
+    return lines.join("\n");
+  } catch (error) {
+    console.warn(
+      `[github-issues] Error fetching GitHub issues: ${
+        error instanceof Error ? error.message : String(error)
+      }. Skipping.`
+    );
+    return undefined;
+  }
+}
+
 function extractIssueFindings(
   roleName: string,
   finalReport: string
@@ -1624,6 +1684,17 @@ async function main(): Promise<void> {
 
   const roles = await resolveRoles(appProfileDefaults);
   const issueTrackerConfig = await resolveIssueTrackerConfig(appProfileDefaults);
+
+  if (issueTrackerConfig?.enabled) {
+    const githubIssues = await fetchGithubOpenIssues(issueTrackerConfig);
+    if (githubIssues) {
+      appProfileDefaults.recentIssuesContext = appProfileDefaults.recentIssuesContext
+        ? `${appProfileDefaults.recentIssuesContext}\n\n${githubIssues}`
+        : githubIssues;
+      console.log(`[github-issues] Fetched open GitHub issues for historical context.`);
+    }
+  }
+
   const issueLoggingMode: "disabled" | "github" | "github-dry-run" =
     issueTrackerConfig?.enabled
       ? issueTrackerConfig.dryRun
