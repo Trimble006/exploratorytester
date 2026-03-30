@@ -52,7 +52,8 @@ const SYSTEM_PROMPT = `You are an expert exploratory tester. Your job is to thor
 
 5. After thorough exploration, provide a **final test report** summarizing:
    - Pages/areas tested
-   - Issues found with severity (Critical/High/Medium/Low). For all bugs, YOU MUST include **Steps To Reproduce (STR)** and any **Test Data used**. For **Agent Issue** items, use severity **Agent Issue** (not Critical/High/Medium/Low) so they can be distinguished from real app defects.
+   - Issues found with severity (Critical/High/Medium/Low). For all bugs, YOU MUST include **Steps To Reproduce (STR)**, **Expected result**, **Actual result**, and any **Test Data used**. Where a server error response (e.g. 403) is the correct behaviour, add a **Note** clarifying where the fix should be applied. For **Agent Issue** items, use severity **Agent Issue** (not Critical/High/Medium/Low) so they can be distinguished from real app defects. When an error could be data-related (e.g. "unique constraint", "already exists", "duplicate"), retry with clearly different test data before reporting as a bug, and document both attempts in the STR to rule out a pre-existing data clash.
+   - If historical bug reports are provided, split Issues found into two sub-sections: **Regressions** (previously reported issues confirmed still present) and **New findings** (issues not previously reported).
    - Positive observations (things that work well)
    - Recommendations
 
@@ -499,10 +500,14 @@ export class AgentSession {
   finalize(): AgentRunResult {
     vlog(`\n${this.rolePrefix} Agent loop finished after processing conversation turns.\n`);
 
-    if (!this.completed) {
-      const lastAgentEntry = [...this.transcript].reverse().find((line) => line.startsWith("[Agent] ")) ?? "";
+    if (!this.finalReport) {
+      const lastAgentEntry = [...this.transcript].reverse().find(
+        (line) => line.startsWith("[Agent Final Timeout Report] ") || line.startsWith("[Agent] ")
+      ) ?? "";
       if (lastAgentEntry) {
-        this.finalReport = lastAgentEntry.replace("[Agent] ", "");
+        this.finalReport = lastAgentEntry
+          .replace("[Agent Final Timeout Report] ", "")
+          .replace("[Agent] ", "");
       }
     }
 
@@ -540,7 +545,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentRunResult> {
     session.transcript.push(`\n--- Max iterations reached. Forcing final report generation. ---`);
     session.contents.push({
       role: "user",
-      parts: [{ text: "maxIterations reached. Testing time is up. Please provide your final test report immediately, including any Issues found (with Steps To Reproduce and Test Data used), Positive observations, and Recommendations. State TESTING COMPLETE at the end." }],
+      parts: [{ text: "maxIterations reached. Testing time is up. Please provide your final test report immediately, including any Issues found split into Regressions (known issues confirmed) and New findings (with Steps To Reproduce, Expected result, Actual result, and Test Data used for each), Positive observations, and Recommendations. State TESTING COMPLETE at the end." }],
     });
     session.completed = true;
 
