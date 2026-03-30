@@ -992,10 +992,10 @@ function buildSystemPrompt(
     prompt += `
 
 ## Application Context (Provided)
-- This context defines the role's capabilities and the features available to them.
-- Treat every capability listed as something that MUST be tested. Derive test scenarios directly from this context — if a capability is listed, exercise it.
-- Use your judgment to identify both happy-path and edge-case scenarios for each capability.
-- Prioritize observed UI behavior and tool outputs over assumptions, but do not skip a capability simply because it isn't immediately visible.
+- This context is a capability map for this role. Use it to derive test scenarios — if a capability is listed, it is a candidate for testing.
+- Not every capability needs to be covered in a single run. Use your judgment to prioritise: focus first on areas called out in the Testing Scope or Issue Context (if present), then on high-risk or complex flows, then on remaining capabilities in order of likely impact.
+- For each area you do test, identify both happy-path and edge-case scenarios.
+- Prioritize observed UI behavior and tool outputs over assumptions.
 
 ${truncateResult(appContext.content, 12000)}`;
   }
@@ -1004,10 +1004,10 @@ ${truncateResult(appContext.content, 12000)}`;
     prompt += `
 
 ## Issue Context (Test Charter)
-- This issue defines the objective and scope for this test run.
-- Treat every capability, scenario, or objective described here as something that MUST be exercised.
-- Derive both happy-path and edge-case scenarios from this context.
-- This supplements (does not replace) the Application Context above — honour both.
+- This issue defines the primary focus for this test run. Prioritise scenarios from this charter above all other exploration.
+- Within your iteration budget, exhaust the chartered objectives before branching into wider coverage.
+- Derive both happy-path and edge-case scenarios for each chartered objective.
+- Use the Application Context to understand what capabilities are available and how to reach them — but the charter drives what you prioritise.
 
 ${truncateResult(appContext.issueContext, 4000)}`;
   }
@@ -1016,7 +1016,9 @@ ${truncateResult(appContext.issueContext, 4000)}`;
     prompt += `
 
 ## Testing Scope
-- These directives define what to focus on or skip during this run. Follow them precisely to avoid wasting effort on areas already covered elsewhere.
+- These directives override default priority ordering. Follow them precisely.
+- Focus areas listed here take highest priority within your iteration budget \u2014 exhaust them before exploring anything else.
+- Skip areas listed here entirely, regardless of what the Application Context or Issue Context suggest.
 
 ${truncateResult(appContext.testingScopeContent, 4000)}`;
   }
