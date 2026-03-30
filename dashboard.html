@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Explorer Cost Dashboard</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #1e293b; font-size: 14px; }
+  a { color: #6366f1; }
+  h1 { font-size: 20px; font-weight: 700; }
+  h2 { font-size: 15px; font-weight: 600; color: #374151; margin-bottom: 12px; }
+  .page { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+  .header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 28px; }
+  .header-meta { color: #64748b; font-size: 12px; margin-top: 4px; }
+  .kpi-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 28px; }
+  .kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px 20px; flex: 1; min-width: 130px; }
+  .kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-bottom: 4px; }
+  .kpi-val { font-size: 22px; font-weight: 700; color: #1e293b; }
+  .kpi-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; padding: 8px 10px; border-bottom: 1px solid #e2e8f0; }
+  td { padding: 9px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .bold { font-weight: 600; }
+  .dim { color: #94a3b8; }
+  .cost-cell { font-weight: 600; color: #6366f1; }
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 9999px; font-size: 11px; background: #ede9fe; color: #6d28d9; margin-left: 6px; }
+  .tag-warn { background: #fef3c7; color: #92400e; }
+  code.ts { font-size: 12px; color: #64748b; }
+  .run-header { cursor: pointer; }
+  .run-header:hover td { background: #f8fafc; }
+  .chevron { color: #94a3b8; font-size: 10px; display: inline-block; transition: transform .15s; }
+  .chevron.open { transform: rotate(90deg); }
+  .inner-table { width: 100%; border-collapse: collapse; border-top: 1px solid #f1f5f9; }
+  .inner-table th { background: #f8fafc; font-size: 11px; padding: 6px 10px 6px 32px; color: #94a3b8; }
+  .inner-table td { padding: 6px 10px 6px 32px; font-size: 13px; border-bottom: 1px solid #f8fafc; }
+  .inner-table tr:last-child td { border-bottom: none; }
+  .pl-8 { padding-left: 32px !important; }
+  .spark-row { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 8px; }
+  .spark-block { display: flex; flex-direction: column; gap: 4px; }
+  .spark-label { font-size: 12px; font-weight: 600; color: #374151; }
+  .notice { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #92400e; margin-bottom: 20px; }
+  .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .filter-bar input, .filter-bar select {
+    border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px;
+    font-size: 13px; background: #fff; color: #1e293b;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { outline: 2px solid #6366f1; border-color: transparent; }
+  @media (max-width: 700px) { .kpi-val { font-size: 18px; } .kpi { min-width: 100px; } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div>
+      <h1>🧪 Explorer Cost Dashboard</h1>
+      <div class="header-meta">Generated 2026-03-30T08:21:15.789Z · Prices approx (Gemini 2.0 Flash: $0.075/1M input, $0.30/1M output) · <a href="https://ai.google.dev/pricing" target="_blank">Verify at ai.google.dev/pricing</a></div>
+    </div>
+  </div>
+
+  <div class="notice">⚠️ Cost estimates are approximate and based on public Gemini API pricing. Verify against your actual billing before invoicing clients.</div>
+
+  <!-- KPIs -->
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-label">Total Cost</div>
+      <div class="kpi-val">$0.1094</div>
+      <div class="kpi-sub">all time, all apps</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Total Tokens</div>
+      <div class="kpi-val">1,417,185</div>
+      <div class="kpi-sub">1,403,405 prompt · 13,780 output</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Runs</div>
+      <div class="kpi-val">6</div>
+      <div class="kpi-sub">21 role executions</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Apps Tested</div>
+      <div class="kpi-val">2</div>
+      <div class="kpi-sub">localhost:3000, bookingplatform</div>
+    </div>
+  </div>
+
+  <!-- Sparklines -->
+  <div class="card">
+    <h2>Cost per Run</h2>
+    <div class="spark-row">
+    <div class="spark-block">
+      <div class="spark-label">unknown</div>
+      <svg width="65" height="44" style="display:block">
+        <rect x="0" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T06-57-59-065Z: $0.0013"/><rect x="13" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-03-45-906Z: $0.0019"/><rect x="26" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-08-29-337Z: $0.0021"/><rect x="39" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-10-05-707Z: $0.0030"/><rect x="52" y="5" width="10" height="35" rx="2" fill="#6366f1" title="2026-03-30T07-20-11-516Z: $0.0473"/>
+      </svg>
+      <div class="dim" style="font-size:11px">5 runs · $0.0554</div>
+    </div>
+    <div class="spark-block">
+      <div class="spark-label">bookingplatform</div>
+      <svg width="13" height="44" style="display:block">
+        <rect x="0" y="0" width="10" height="40" rx="2" fill="#6366f1" title="2026-03-30T08-09-53-064Z: $0.0539"/>
+      </svg>
+      <div class="dim" style="font-size:11px">1 run · $0.0539</div>
+    </div></div>
+    <div class="dim" style="font-size:11px;margin-top:8px">Each bar = one run · <span style="color:#6366f1">■</span> normal · <span style="color:#f59e0b">■</span> interrupted</div>
+  </div>
+
+  <!-- By App -->
+  <div class="card">
+    <h2>By App &nbsp;<span class="dim" style="font-weight:400;font-size:12px">(client billing view)</span></h2>
+    <table>
+      <thead>
+        <tr>
+          <th>App</th>
+          <th class="num">Runs</th>
+          <th class="num">Role Execs</th>
+          <th class="num">Prompt Tokens</th>
+          <th class="num">Output Tokens</th>
+          <th class="num">Total Tokens</th>
+          <th class="num">Est. Cost</th>
+          <th>Environments tested</th>
+        </tr>
+      </thead>
+      <tbody>
+    <tr>
+      <td class="bold">localhost:3000</td>
+      <td class="num">5</td>
+      <td class="num">17</td>
+      <td class="num">708,797</td>
+      <td class="num">7,605</td>
+      <td class="num bold">716,402</td>
+      <td class="num cost-cell">$0.0554</td>
+      <td><svg width="120" height="16" style="vertical-align:middle"><rect width="120" height="16" rx="3" fill="#e5e7eb"/><rect width="120" height="16" rx="3" fill="#6366f1"/></svg> <span class="dim">localhost:3000</span></td>
+    </tr>
+    <tr>
+      <td class="bold">bookingplatform</td>
+      <td class="num">1</td>
+      <td class="num">4</td>
+      <td class="num">694,608</td>
+      <td class="num">6,175</td>
+      <td class="num bold">700,783</td>
+      <td class="num cost-cell">$0.0539</td>
+      <td><svg width="120" height="16" style="vertical-align:middle"><rect width="120" height="16" rx="3" fill="#e5e7eb"/><rect width="117" height="16" rx="3" fill="#6366f1"/></svg> <span class="dim">localhost:3000</span></td>
+    </tr></tbody>
+    </table>
+  </div>
+
+  <!-- Per Run -->
+  <div class="card">
+    <h2>Per-Run Breakdown &nbsp;<span class="dim" style="font-weight:400;font-size:12px">click a row to expand roles</span></h2>
+    <div class="filter-bar">
+      <input type="search" id="run-filter" placeholder="Filter by run ID / app…" oninput="filterRuns(this.value)" style="width:280px">
+      <select id="app-filter" onchange="filterRuns(document.getElementById('run-filter').value)">
+        <option value="">All apps</option>
+        <option value="localhost:3000">localhost:3000</option><option value="bookingplatform">bookingplatform</option>
+      </select>
+    </div>
+    <table id="run-table">
+      <thead>
+        <tr>
+          <th>Run ID</th>
+          <th>Host</th>
+          <th class="num">Roles</th>
+          <th class="num">Prompt</th>
+          <th class="num">Output</th>
+          <th class="num">Total Tokens</th>
+          <th class="num">Est. Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+    <tr class="run-header" onclick="toggle('run-detail-0')">
+      <td><span class="chevron" id="chev-run-detail-0">▶</span> <code class="ts">2026-03-30T08-09-53-064Z</code> <span class="tag">bookingplatform</span> </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">4</td>
+      <td class="num">694,608</td>
+      <td class="num">6,175</td>
+      <td class="num bold">700,783</td>
+      <td class="num cost-cell">$0.0539</td>
+    </tr>
+    <tr id="run-detail-0" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">151,278</td>
+        <td class="num dim">1,234</td>
+        <td class="num dim">152,512</td>
+        <td class="num dim">$0.0117</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ user</td>
+        <td class="num dim">146,101</td>
+        <td class="num dim">1,256</td>
+        <td class="num dim">147,357</td>
+        <td class="num dim">$0.0113</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ tenant admin</td>
+        <td class="num dim">275,363</td>
+        <td class="num dim">1,853</td>
+        <td class="num dim">277,216</td>
+        <td class="num dim">$0.0212</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ maintenance</td>
+        <td class="num dim">121,866</td>
+        <td class="num dim">1,832</td>
+        <td class="num dim">123,698</td>
+        <td class="num dim">$0.0097</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr>
+    <tr class="run-header" onclick="toggle('run-detail-1')">
+      <td><span class="chevron" id="chev-run-detail-1">▶</span> <code class="ts">2026-03-30T07-20-11-516Z</code>  </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">4</td>
+      <td class="num">611,994</td>
+      <td class="num">4,558</td>
+      <td class="num bold">616,552</td>
+      <td class="num cost-cell">$0.0473</td>
+    </tr>
+    <tr id="run-detail-1" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ user</td>
+        <td class="num dim">21,887</td>
+        <td class="num dim">211</td>
+        <td class="num dim">22,098</td>
+        <td class="num dim">$0.0017</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ maintenance</td>
+        <td class="num dim">125,331</td>
+        <td class="num dim">1,290</td>
+        <td class="num dim">126,621</td>
+        <td class="num dim">$0.0098</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">153,343</td>
+        <td class="num dim">1,828</td>
+        <td class="num dim">155,171</td>
+        <td class="num dim">$0.0120</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ tenant admin</td>
+        <td class="num dim">311,433</td>
+        <td class="num dim">1,229</td>
+        <td class="num dim">312,662</td>
+        <td class="num dim">$0.0237</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr>
+    <tr class="run-header" onclick="toggle('run-detail-2')">
+      <td><span class="chevron" id="chev-run-detail-2">▶</span> <code class="ts">2026-03-30T07-10-05-707Z</code>  </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">4</td>
+      <td class="num">35,865</td>
+      <td class="num">956</td>
+      <td class="num bold">36,821</td>
+      <td class="num cost-cell">$0.0030</td>
+    </tr>
+    <tr id="run-detail-2" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ user</td>
+        <td class="num dim">5,272</td>
+        <td class="num dim">230</td>
+        <td class="num dim">5,502</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ maintenance</td>
+        <td class="num dim">5,248</td>
+        <td class="num dim">118</td>
+        <td class="num dim">5,366</td>
+        <td class="num dim">$0.0004</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">11,166</td>
+        <td class="num dim">389</td>
+        <td class="num dim">11,555</td>
+        <td class="num dim">$0.0010</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ tenant admin</td>
+        <td class="num dim">14,179</td>
+        <td class="num dim">219</td>
+        <td class="num dim">14,398</td>
+        <td class="num dim">$0.0011</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr>
+    <tr class="run-header" onclick="toggle('run-detail-3')">
+      <td><span class="chevron" id="chev-run-detail-3">▶</span> <code class="ts">2026-03-30T07-08-29-337Z</code>  </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">4</td>
+      <td class="num">24,282</td>
+      <td class="num">880</td>
+      <td class="num bold">25,162</td>
+      <td class="num cost-cell">$0.0021</td>
+    </tr>
+    <tr id="run-detail-3" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ user</td>
+        <td class="num dim">5,322</td>
+        <td class="num dim">221</td>
+        <td class="num dim">5,543</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">5,354</td>
+        <td class="num dim">260</td>
+        <td class="num dim">5,614</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ tenant admin</td>
+        <td class="num dim">8,354</td>
+        <td class="num dim">231</td>
+        <td class="num dim">8,585</td>
+        <td class="num dim">$0.0007</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ maintenance</td>
+        <td class="num dim">5,252</td>
+        <td class="num dim">168</td>
+        <td class="num dim">5,420</td>
+        <td class="num dim">$0.0004</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr>
+    <tr class="run-header" onclick="toggle('run-detail-4')">
+      <td><span class="chevron" id="chev-run-detail-4">▶</span> <code class="ts">2026-03-30T07-03-45-906Z</code>  </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">4</td>
+      <td class="num">21,507</td>
+      <td class="num">800</td>
+      <td class="num bold">22,307</td>
+      <td class="num cost-cell">$0.0019</td>
+    </tr>
+    <tr id="run-detail-4" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ tenant admin</td>
+        <td class="num dim">5,573</td>
+        <td class="num dim">213</td>
+        <td class="num dim">5,786</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">5,382</td>
+        <td class="num dim">183</td>
+        <td class="num dim">5,565</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ user</td>
+        <td class="num dim">5,300</td>
+        <td class="num dim">235</td>
+        <td class="num dim">5,535</td>
+        <td class="num dim">$0.0005</td>
+      </tr>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ maintenance</td>
+        <td class="num dim">5,252</td>
+        <td class="num dim">169</td>
+        <td class="num dim">5,421</td>
+        <td class="num dim">$0.0004</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr>
+    <tr class="run-header" onclick="toggle('run-detail-5')">
+      <td><span class="chevron" id="chev-run-detail-5">▶</span> <code class="ts">2026-03-30T06-57-59-065Z</code>  </td>
+      <td class="dim">localhost:3000</td>
+      <td class="num">1</td>
+      <td class="num">15,149</td>
+      <td class="num">411</td>
+      <td class="num bold">15,560</td>
+      <td class="num cost-cell">$0.0013</td>
+    </tr>
+    <tr id="run-detail-5" class="detail-rows" style="display:none">
+      <td colspan="7" style="padding:0">
+        <table class="inner-table">
+          <thead><tr><th>Role</th><th>Prompt</th><th>Output</th><th>Total</th><th>Cost</th></tr></thead>
+          <tbody>
+      <tr class="role-row">
+        <td class="pl-8 dim">↳ platform admin</td>
+        <td class="num dim">15,149</td>
+        <td class="num dim">411</td>
+        <td class="num dim">15,560</td>
+        <td class="num dim">$0.0013</td>
+      </tr></tbody>
+        </table>
+      </td>
+    </tr></tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+function toggle(id) {
+  const el   = document.getElementById(id);
+  const chev = document.getElementById('chev-' + id);
+  const open = el.style.display === 'none';
+  el.style.display  = open ? '' : 'none';
+  chev.classList.toggle('open', open);
+}
+
+function filterRuns(text) {
+  const appFilter = document.getElementById('app-filter').value.toLowerCase();
+  const q = text.toLowerCase();
+  const rows = document.querySelectorAll('#run-table tbody tr.run-header');
+  rows.forEach(row => {
+    const detail = row.nextElementSibling;
+    const txt    = row.textContent.toLowerCase();
+    const match  = (!q || txt.includes(q)) && (!appFilter || txt.includes(appFilter));
+    row.style.display    = match ? '' : 'none';
+    detail.style.display = 'none'; // collapse on filter change
+    const chev = row.querySelector('.chevron');
+    if (chev) chev.classList.remove('open');
+  });
+}
+</script>
+</body>
+</html>
