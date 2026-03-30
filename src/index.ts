@@ -144,6 +144,8 @@ function normalizeAppKey(input: string): string {
 interface TokenUsageLogEntry {
   ts: string;
   runId: string;
+  app: string;
+  profile: string;
   url: string;
   model: string;
   role: string;
@@ -1622,6 +1624,8 @@ async function main(): Promise<void> {
         await appendTokenUsageEntry(tokenUsageLogPath, {
           ts: new Date().toISOString(),
           runId: `${cleanupRunId}-interrupted`,
+          app: appProfileDefaults.appUnderTest ?? "unknown",
+          profile: appProfileDefaults.appProfile ?? "unknown",
           url: session.options.targetUrl,
           model: session.options.model,
           role: session.options.roleName,
@@ -1749,6 +1753,8 @@ async function main(): Promise<void> {
             await appendTokenUsageEntry(tokenUsageLogPath, {
               ts: new Date().toISOString(),
               runId: reportTimestamp,
+              app: appProfileDefaults.appUnderTest ?? "unknown",
+              profile: appProfileDefaults.appProfile ?? "unknown",
               url: targetUrl,
               model: finalized.model,
               role: finalized.roleName,
@@ -1810,6 +1816,8 @@ async function main(): Promise<void> {
             await appendTokenUsageEntry(tokenUsageLogPath, {
               ts: new Date().toISOString(),
               runId: reportTimestamp,
+              app: appProfileDefaults.appUnderTest ?? "unknown",
+              profile: appProfileDefaults.appProfile ?? "unknown",
               url: targetUrl,
               model: result.model,
               role: result.roleName,

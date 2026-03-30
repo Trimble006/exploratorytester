@@ -129,24 +129,23 @@ for (const e of entries) {
 }
 
 // ---------------------------------------------------------------------------
-// Aggregate: by URL (for client billing)
+// Aggregate: by App (for client billing) — falls back to URL host for old entries
 // ---------------------------------------------------------------------------
-const byUrl = new Map();
+const byApp = new Map();
 for (const e of entries) {
-  let host;
-  try { host = new URL(e.url).host; } catch { host = e.url; }
-
-  if (!byUrl.has(host)) {
-    byUrl.set(host, { host, prompt: 0, output: 0, cached: 0, total: 0, cost: 0, runIds: new Set(), roleExecs: 0 });
+  const appKey = e.app || (() => { try { return new URL(e.url).host; } catch { return e.url; } })();
+  if (!byApp.has(appKey)) {
+    byApp.set(appKey, { app: appKey, prompt: 0, output: 0, cached: 0, total: 0, cost: 0, runIds: new Set(), roleExecs: 0, envs: new Set() });
   }
-  const u = byUrl.get(host);
-  u.prompt    += e.prompt;
-  u.output    += e.output;
-  u.cached    += e.cached;
-  u.total     += e.total;
-  u.cost      += calcCost(e);
-  u.runIds.add(e.runId);
-  u.roleExecs++;
+  const a = byApp.get(appKey);
+  a.prompt    += e.prompt;
+  a.output    += e.output;
+  a.cached    += e.cached;
+  a.total     += e.total;
+  a.cost      += calcCost(e);
+  a.runIds.add(e.runId);
+  a.roleExecs++;
+  if (e.url) { try { a.envs.add(new URL(e.url).host); } catch { a.envs.add(e.url); } }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,13 +169,14 @@ if (jsonOutput) {
     roles: r.roles,
     totalCost: +r.totalCost.toFixed(6),
   }));
-  const urls = Array.from(byUrl.values()).map(u => ({
-    ...u,
-    runIds: Array.from(u.runIds),
-    runCount: u.runIds.size,
-    cost: +u.cost.toFixed(6),
+  const apps = Array.from(byApp.values()).map(a => ({
+    ...a,
+    runIds: Array.from(a.runIds),
+    envs: Array.from(a.envs),
+    runCount: a.runIds.size,
+    cost: +a.cost.toFixed(6),
   }));
-  console.log(JSON.stringify({ runs, urls, lifetime: { ...lifetime, cost: +lifetime.cost.toFixed(6) } }, null, 2));
+  console.log(JSON.stringify({ runs, apps, lifetime: { ...lifetime, cost: +lifetime.cost.toFixed(6) } }, null, 2));
   process.exit(0);
 }
 
@@ -276,25 +276,30 @@ table(runHdrs, runCols, runRows);
 console.log("");
 
 // ---------------------------------------------------------------------------
-// By URL — client billing view
+// By App — client billing view
 // ---------------------------------------------------------------------------
-console.log(bold("  By Target URL  (client billing view)"));
+console.log(bold("  By App  (client billing view)"));
 console.log("");
 
-const urlSorted = Array.from(byUrl.values()).sort((a, b) => b.cost - a.cost);
-const urlCols   = [34, 8, 12, 14, 14, 14, 12];
-const urlHdrs   = ["Host", "Runs", "Role Execs", "Prompt", "Output", "Total Tokens", "Est. Cost"];
-const urlRows   = urlSorted.map(u => [
-  l(u.host),
-  r(u.runIds.size),
-  r(u.roleExecs),
-  r(fmt(u.prompt)),
-  r(fmt(u.output)),
-  r(fmt(u.total)),
-  r(fmtC(u.cost), u.cost > 0.10 ? yellow : green),
-]);
+const appSorted = Array.from(byApp.values()).sort((a, b) => b.cost - a.cost);
+const appCols   = [28, 8, 12, 14, 14, 14, 12, 20];
+const appHdrs   = ["App", "Runs", "Role Execs", "Prompt", "Output", "Total Tokens", "Est. Cost", "Environments tested"];
+const appRows   = [];
+for (const a of appSorted) {
+  const envList = Array.from(a.envs).join(", ");
+  appRows.push([
+    l(a.app),
+    r(a.runIds.size),
+    r(a.roleExecs),
+    r(fmt(a.prompt)),
+    r(fmt(a.output)),
+    r(fmt(a.total)),
+    r(fmtC(a.cost), a.cost > 0.10 ? yellow : green),
+    l(dim(envList)),
+  ]);
+}
 
-table(urlHdrs, urlCols, urlRows);
+table(appHdrs, appCols, appRows);
 console.log("");
 
 // ---------------------------------------------------------------------------
