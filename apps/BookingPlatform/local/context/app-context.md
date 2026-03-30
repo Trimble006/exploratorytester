@@ -1,5 +1,18 @@
 # BookingPlatform App Context
 
+## Domain
+This platform serves **outdoor bowls clubs** (lawn bowls, crown green bowls, flat green bowls).
+It is **NOT** for tenpin bowling, indoor bowling, or any other variant.
+
+## Domain Glossary
+- **Green** — the outdoor grass or artificial playing surface owned by the club
+- **Rink** — a defined strip of the green on which one game is played; multiple rinks run side-by-side on a green
+- **End** — a round of play in one direction across the rink
+- **Jack** — the small white target ball bowled to start each end
+- **Mat** — the rubber mat from which the player delivers the bowl
+- **Ditch** — the shallow trench surrounding the green boundary
+- **Club** / **Tenant** — the bowling club that subscribes to the platform
+
 ## Platform overview
  - Platform to provide websites for bowling clubs across the globe.  Platform will obtain fees from clubs for the hosting and offer a wide range of features.  Clubs will have their own admins and ability to opt in/out of some features. At some future point, we will support the idea of 'federations', where members of a club can behave a thou hthey are members of a second club. Clubs will be able to configure their site to their own design via content management service within the platform and tailor fees/events/openng times. Clubs will be bale to advertise events on the website, and optionally make these visible to the public.  Similarly, clubs can opt in/out of disaplying events from other clubs on their website.
 

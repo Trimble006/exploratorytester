@@ -721,16 +721,40 @@ function applyRoleScopedDefaults(
   }));
 }
 
+function filterRolesByEnv(roles: RoleConfig[]): RoleConfig[] {
+  const rolesRaw = envValue("ROLES");
+  if (!rolesRaw) return roles;
+
+  const requested = rolesRaw
+    .split(",")
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+
+  const filtered = roles.filter((r) => requested.includes(r.name.toLowerCase()));
+
+  if (filtered.length === 0) {
+    const available = roles.map((r) => r.name).join(", ");
+    throw new Error(
+      `ROLES filter "${rolesRaw}" matched no roles. Available roles: ${available}`
+    );
+  }
+
+  return filtered;
+}
+
 async function resolveRoles(
   appProfileDefaults: AppProfileDefaults
 ): Promise<RoleConfig[]> {
   const configPath = envValue("ROLES_CONFIG_FILE");
   if (configPath) {
-    return parseRolesFromJson(configPath);
+    return filterRolesByEnv(await parseRolesFromJson(configPath));
   }
 
   if (appProfileDefaults.rolesConfigFile) {
-    return parseRolesFromJson(appProfileDefaults.rolesConfigFile);
+    return applyRoleScopedDefaults(
+      filterRolesByEnv(await parseRolesFromJson(appProfileDefaults.rolesConfigFile)),
+      appProfileDefaults
+    );
   }
 
   const envRoles = parseRolesFromEnv();

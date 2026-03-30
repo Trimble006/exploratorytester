@@ -5,3 +5,4 @@ dist/
 !src/**
 .env
 apps/**/outputs/
+talk/*.pptx

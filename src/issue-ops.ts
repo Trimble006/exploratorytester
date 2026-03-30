@@ -35,6 +35,18 @@ export interface IssueBodyOverrides {
   concurrency?: number;
   interleave?: boolean;
   roles?: string;
+  /** Array of role objects for auto-scaffolding a new app profile */
+  roleConfig?: unknown[];
+  /** GitHub issue-tracker config object for auto-scaffolding */
+  issueTracker?: Record<string, unknown>;
+  /** Inline app context content (populated from ## App Context heading or contextUrl) */
+  appContext?: string;
+  /** Inline historical bugs content (populated from ## Historical Bugs heading or historicalBugsUrl) */
+  historicalBugs?: string;
+  /** URL to fetch app context from (fallback when no inline ## App Context section) */
+  contextUrl?: string;
+  /** URL to fetch historical bugs from (fallback when no inline ## Historical Bugs section) */
+  historicalBugsUrl?: string;
   [key: string]: unknown;
 }
 
@@ -92,7 +104,36 @@ export async function fetchIssueTestParams(
 
   const appUnderTest = extractPrefixedLabel(labels, "app:");
   const appVersion = extractPrefixedLabel(labels, "version:");
-  const overrides = parseJsonBlock(issue.body ?? "");
+  const issueBody = issue.body ?? "";
+  const overrides = parseJsonBlock(issueBody);
+
+  // Resolve app context: inline heading wins, then contextUrl fallback
+  const sections = parseContextSections(issueBody);
+  if (sections.appContext) {
+    overrides.appContext = sections.appContext;
+  } else if (overrides.contextUrl && typeof overrides.contextUrl === "string") {
+    try {
+      overrides.appContext = await fetchTextUrl(overrides.contextUrl);
+    } catch (err) {
+      console.warn(`IssueOps: could not fetch contextUrl (${overrides.contextUrl}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Resolve historical bugs: inline heading wins, then historicalBugsUrl fallback
+  if (sections.historicalBugs) {
+    overrides.historicalBugs = sections.historicalBugs;
+  } else if (overrides.historicalBugsUrl && typeof overrides.historicalBugsUrl === "string") {
+    try {
+      overrides.historicalBugs = await fetchTextUrl(overrides.historicalBugsUrl);
+    } catch (err) {
+      console.warn(`IssueOps: could not fetch historicalBugsUrl (${overrides.historicalBugsUrl}): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Resolve roles scope: ## Roles heading wins over plain-text; JSON block wins over both
+  if (!overrides.roles && sections.roles) {
+    overrides.roles = sections.roles;
+  }
 
   return {
     issueNumber: issue.number,
@@ -231,7 +272,66 @@ function parsePlainTextOverrides(body: string): IssueBodyOverrides {
     overrides.environment = envMatch[1];
   }
 
+  // Roles (scope): "test only Maintenance role", "only run platform admin", "roles: maintenance, user"
+  const rolesNaturalMatch = body.match(
+    /(?:test\s+only|only\s+test|run\s+only|only\s+run)\s+([\w][^.,;\n]*?)(?:\s+roles?)?\s*(?:[.,;]|\s*$)/im
+  );
+  const rolesKvMatch = body.match(/\broles?[\s:]+([^\n{}\[\]]+)/i);
+  if (rolesNaturalMatch) {
+    overrides.roles = rolesNaturalMatch[1].trim().toLowerCase();
+  } else if (rolesKvMatch) {
+    overrides.roles = rolesKvMatch[1].trim().toLowerCase();
+  }
+
   return overrides;
+}
+
+function parseContextSections(body: string): { appContext?: string; historicalBugs?: string; roles?: string } {
+  const result: { appContext?: string; historicalBugs?: string; roles?: string } = {};
+
+  // Match a heading (## or #) followed by its content up to the next heading or end of string
+  const sectionRegex = /^#{1,2}\s+(.+)$/gm;
+  const headings: Array<{ name: string; start: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = sectionRegex.exec(body)) !== null) {
+    headings.push({ name: match[1].trim(), start: match.index + match[0].length });
+  }
+
+  for (let i = 0; i < headings.length; i++) {
+    const { name, start } = headings[i];
+    const end = i + 1 < headings.length ? headings[i + 1].start - headings[i + 1].name.length - 5 : body.length;
+    const content = body.slice(start, end).trim();
+
+    if (/^app\s+context$/i.test(name)) {
+      result.appContext = content || undefined;
+    } else if (/^historical\s+bugs?$/i.test(name)) {
+      result.historicalBugs = content || undefined;
+    } else if (/^roles?$/i.test(name)) {
+      // Strip markdown list markers and join as comma-separated names
+      const names = content
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^[-*]\s+/, "").trim())
+        .filter(Boolean)
+        .join(", ");
+      result.roles = names.toLowerCase() || undefined;
+    }
+  }
+
+  return result;
+}
+
+async function fetchTextUrl(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} fetching context URL: ${url}`);
+    }
+    return await res.text();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseJsonBlock(body: string): IssueBodyOverrides {

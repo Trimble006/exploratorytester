@@ -6,5 +6,5 @@
   "labels": ["exploratory-test", "auto-filed"],
   "titlePrefix": "[Exploratory]",
   "dedupeByTitle": true,
-  "dryRun": true
+  "dryRun": false
 }

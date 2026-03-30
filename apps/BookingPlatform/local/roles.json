@@ -9,7 +9,7 @@
       "historicalBugReportsFile": "",
       "testingScopeFile": "",
       "model": "",
-      "maxIterations": 0
+      "maxIterations": 20
     },
     {
       "name": "tenant admin",
@@ -20,7 +20,7 @@
       "historicalBugReportsFile": "",
       "testingScopeFile": "",
       "model": "",
-      "maxIterations": 0
+      "maxIterations": 30
     },
     {
       "name": "user",
@@ -42,7 +42,7 @@
       "historicalBugReportsFile": "",
       "testingScopeFile": "",
       "model": "",
-      "maxIterations": 0
+      "maxIterations": 20
     }
   ]
 }
