@@ -239,6 +239,7 @@ export interface AppContext {
   historicalBugReportSourceFile?: string;
   testingScopeContent?: string;
   testingScopeSourceFile?: string;
+  issueContext?: string;
 }
 
 export interface AgentOptions {
@@ -997,6 +998,18 @@ function buildSystemPrompt(
 - Prioritize observed UI behavior and tool outputs over assumptions, but do not skip a capability simply because it isn't immediately visible.
 
 ${truncateResult(appContext.content, 12000)}`;
+  }
+
+  if (appContext?.issueContext) {
+    prompt += `
+
+## Issue Context (Test Charter)
+- This issue defines the objective and scope for this test run.
+- Treat every capability, scenario, or objective described here as something that MUST be exercised.
+- Derive both happy-path and edge-case scenarios from this context.
+- This supplements (does not replace) the Application Context above — honour both.
+
+${truncateResult(appContext.issueContext, 4000)}`;
   }
 
   if (appContext?.testingScopeContent) {

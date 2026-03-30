@@ -126,6 +126,7 @@ interface AppProfileDefaults {
   environments?: EnvironmentsConfig;
   resultsDir?: string;
   recentIssuesContext?: string;
+  issueContext?: string;
 }
 
 interface EnvironmentsConfig {
@@ -884,10 +885,12 @@ async function resolveRoleAppContext(
   historicalBugReportsFile?: string,
   appVersion?: string,
   recentIssuesContext?: string,
-  testingScopeFile?: string
+  testingScopeFile?: string,
+  issueContext?: string
 ): Promise<AppContext> {
   const appContext = await resolveAppContext(contextFile);
   appContext.appVersion = appVersion;
+  if (issueContext) appContext.issueContext = issueContext;
 
   let bugReportsContent = "";
   let bugReportsSourceFile: string | undefined = undefined;
@@ -1695,6 +1698,15 @@ async function main(): Promise<void> {
     }
   }
 
+  if (issueParams) {
+    const parts: string[] = [`Issue #${issueParams.issueNumber}: ${issueParams.issueTitle}`, `${issueParams.issueUrl}`];
+    if (issueParams.overrides.appContext) {
+      parts.push(``, issueParams.overrides.appContext);
+    }
+    appProfileDefaults.issueContext = parts.join(`\n`);
+    console.log(`[issue-context] Test charter set from issue #${issueParams.issueNumber}.`);
+  }
+
   const issueLoggingMode: "disabled" | "github" | "github-dry-run" =
     issueTrackerConfig?.enabled
       ? issueTrackerConfig.dryRun
@@ -1789,7 +1801,8 @@ async function main(): Promise<void> {
             role.historicalBugReportsFile,
             appProfileDefaults.appVersion,
             appProfileDefaults.recentIssuesContext,
-            role.testingScopeFile ?? appProfileDefaults.testingScopeFile
+            role.testingScopeFile ?? appProfileDefaults.testingScopeFile,
+            appProfileDefaults.issueContext
           );
 
           const roleMaxIterations = role.maxIterations ?? maxIterations;
@@ -1892,7 +1905,8 @@ async function main(): Promise<void> {
               role.historicalBugReportsFile,
               appProfileDefaults.appVersion,
               appProfileDefaults.recentIssuesContext,
-              role.testingScopeFile ?? appProfileDefaults.testingScopeFile
+              role.testingScopeFile ?? appProfileDefaults.testingScopeFile,
+              appProfileDefaults.issueContext
             );
             const roleMaxIterations = role.maxIterations ?? maxIterations;
             const roleModel = role.model ?? model;
