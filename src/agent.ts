@@ -5,6 +5,7 @@ import {
   type GenerateContentResult,
   type Part,
 } from "@google/generative-ai";
+import { GoogleAICacheManager } from "@google/generative-ai/server";
 import { McpClient } from "./mcp-client.js";
 
 export interface TokenUsage {
@@ -47,10 +48,11 @@ const SYSTEM_PROMPT = `You are an expert exploratory tester. Your job is to thor
    - **Accessibility**: Missing labels, poor contrast, keyboard navigation issues
    - **Performance**: Slow loading, unresponsive elements
    - **Security Concern**: Visible in the UI (e.g., sensitive data exposure, missing HTTPS)
+   - **Agent Issue**: A problem with the testing tooling itself, NOT the application — e.g. Playwright/browser errors, MCP tool failures, dev-only overlays (Next.js Dev Overlay, React error boundaries in dev mode), or other infrastructure problems that would not affect real users. Use this category whenever the issue is with how the agent interacts with the app rather than a genuine application defect.
 
 5. After thorough exploration, provide a **final test report** summarizing:
    - Pages/areas tested
-   - Issues found with severity (Critical/High/Medium/Low). For all bugs, YOU MUST include **Steps To Reproduce (STR)** and any **Test Data used**.
+   - Issues found with severity (Critical/High/Medium/Low). For all bugs, YOU MUST include **Steps To Reproduce (STR)** and any **Test Data used**. For **Agent Issue** items, use severity **Agent Issue** (not Critical/High/Medium/Low) so they can be distinguished from real app defects.
    - Positive observations (things that work well)
    - Recommendations
 
@@ -64,6 +66,10 @@ const SYSTEM_PROMPT = `You are an expert exploratory tester. Your job is to thor
 - Dismiss blockers when appropriate before retrying blocked interactions.
 - Prefer non-destructive dismissal first (Close, Cancel, Dismiss, Reject, Escape). If needed to continue, Confirm/OK is allowed.
 - If a blocker cannot be dismissed, record it and continue testing other reachable paths.
+- If a browser JS dialog (alert, confirm, or prompt) appears, dismiss it immediately before continuing.
+- If a browser permission prompt appears (camera, microphone, location, or notifications), deny or block it and continue testing.
+- If a third-party chat widget, support overlay, or similar non-app popup appears, dismiss it and continue.
+- If an interaction fails with no visible in-page blocker, the browser may have lost focus to an OS notification or another app. Take a snapshot to restore browser focus and retry the action.
 - Keep track of which areas you've tested to ensure coverage.
 - When you've thoroughly tested the site, state "TESTING COMPLETE" and provide your final report.`;
 
@@ -91,6 +97,44 @@ const BLOCKER_HINT_PATTERNS = [
   /allow notifications/i,
 ];
 
+const BROWSER_DIALOG_PATTERNS = [
+  /role=dialog/i,
+  /javascript.*dialog/i,
+  /\balert\b.*button/i,
+  /confirm.*dialog/i,
+  /\bprompt\b.*dialog/i,
+];
+
+const PERMISSION_PROMPT_PATTERNS = [
+  /wants to/i,
+  /access your/i,
+  /use your microphone/i,
+  /use your camera/i,
+  /know your location/i,
+  /send.*notification/i,
+  /show.*notification/i,
+];
+
+const EXTERNAL_OVERLAY_PATTERNS = [
+  /intercom/i,
+  /\bcrisp\b/i,
+  /hubspot/i,
+  /zendesk/i,
+  /\bdrift\b/i,
+  /\btawk\b/i,
+  /livechat/i,
+  /freshchat/i,
+];
+
+const DENY_PERMISSION_LABELS = [
+  "block",
+  "deny",
+  "don't allow",
+  "dont allow",
+  "never",
+  "disallow",
+];
+
 const SAFE_DISMISS_LABELS = [
   "close",
   "dismiss",
@@ -113,6 +157,15 @@ const PROCEED_LABELS = [
   "confirm",
   "yes",
 ];
+
+const INTERACTABLE_TOOLS = new Set([
+  "browser_click",
+  "browser_fill",
+  "browser_select_option",
+  "browser_check",
+  "browser_uncheck",
+  "browser_drag_and_drop",
+]);
 
 const MAX_DISMISS_ATTEMPTS = 6;
 const GEMINI_RATE_LIMIT_MAX_RETRIES = parsePositiveIntEnv(
@@ -154,6 +207,13 @@ interface BlockerEvent {
   details: string;
 }
 
+interface UnexpectedActivityEvent {
+  type: "browser-dialog" | "permission-prompt" | "external-overlay" | "focus-interference";
+  source: string;
+  handled: boolean;
+  details: string;
+}
+
 interface RiskCoverageItem {
   risk: string;
   exercised: boolean;
@@ -176,6 +236,8 @@ export interface AppContext {
   sourceFile?: string;
   historicalBugReportContext?: string;
   historicalBugReportSourceFile?: string;
+  testingScopeContent?: string;
+  testingScopeSourceFile?: string;
 }
 
 export interface AgentOptions {
@@ -209,11 +271,14 @@ export class AgentSession {
   public rolePrefix: string;
   public transcript: string[] = [];
   public blockerEvents: BlockerEvent[] = [];
+  public unexpectedActivityEvents: UnexpectedActivityEvent[] = [];
+  public hasDialogTool = false;
   public contents: Content[] = [];
   
   public contextMode: "file" | "auto-research";
   public contextSource?: string;
   public historicalBugReportSource?: string;
+  public testingScopeSource?: string;
   public researchSummary?: string;
   
   public genAI: GoogleGenerativeAI;
@@ -232,6 +297,7 @@ export class AgentSession {
     this.contextMode = options.appContext?.mode ?? "auto-research";
     this.contextSource = options.appContext?.sourceFile;
     this.historicalBugReportSource = options.appContext?.historicalBugReportSourceFile;
+    this.testingScopeSource = options.appContext?.testingScopeSourceFile;
   }
 
   async setup() {
@@ -249,12 +315,39 @@ export class AgentSession {
 
     const functionDeclarations = await mcpClient.getGeminiFunctionDeclarations();
     vlog(`${this.rolePrefix} Loaded ${functionDeclarations.length} browser tools from Playwright MCP`);
+    this.hasDialogTool = functionDeclarations.some((fd) => fd.name === "browser_handle_dialog");
 
-    this.generativeModel = this.genAI.getGenerativeModel({
-      model,
-      tools: [{ functionDeclarations }],
-      systemInstruction: buildSystemPrompt(testCredentials, appContext, this.researchSummary),
-    });
+    const systemPrompt = buildSystemPrompt(testCredentials, appContext, this.researchSummary);
+    const cacheTtlSeconds = parsePositiveIntEnv("GEMINI_CACHE_TTL_SECONDS", 600);
+    let cacheUsed = false;
+
+    try {
+      const cacheManager = new GoogleAICacheManager(this.options.apiKey);
+      const cache = await cacheManager.create({
+        model,
+        systemInstruction: { role: "system", parts: [{ text: systemPrompt }] },
+        ttlSeconds: cacheTtlSeconds,
+        contents: [],
+      });
+      this.generativeModel = this.genAI.getGenerativeModelFromCachedContent(cache, {
+        tools: [{ functionDeclarations }],
+      });
+      cacheUsed = true;
+      this.transcript.push(`${this.rolePrefix} [cache created: TTL ${cacheTtlSeconds}s, name=${cache.name}]`);
+      vlog(`${this.rolePrefix} Context cache created (${cache.name})`);
+    } catch (cacheErr) {
+      const reason = cacheErr instanceof Error ? cacheErr.message : String(cacheErr);
+      this.transcript.push(`${this.rolePrefix} [cache skipped: ${reason.slice(0, 120)}]`);
+      vlog(`${this.rolePrefix} Context cache skipped: ${reason}`);
+    }
+
+    if (!cacheUsed) {
+      this.generativeModel = this.genAI.getGenerativeModel({
+        model,
+        tools: [{ functionDeclarations }],
+        systemInstruction: systemPrompt,
+      });
+    }
 
     const initialInstruction = buildInitialInstruction(targetUrl, appContext, this.researchSummary);
 
@@ -274,6 +367,7 @@ export class AgentSession {
     this.transcript.push(`${this.rolePrefix} App context mode: ${this.contextMode}`);
     if (this.contextSource) this.transcript.push(`${this.rolePrefix} App context file: ${this.contextSource}`);
     if (this.historicalBugReportSource) this.transcript.push(`${this.rolePrefix} Historical bug reports file: ${this.historicalBugReportSource}`);
+    if (this.testingScopeSource) this.transcript.push(`${this.rolePrefix} Testing scope file: ${this.testingScopeSource}`);
     if (testCredentials) this.transcript.push(`${this.rolePrefix} Authenticated testing enabled with ${testCredentials.identifierType} credentials.`);
   }
 
@@ -362,11 +456,12 @@ export class AgentSession {
           let errorMessage = error instanceof Error ? error.message : String(error);
 
           if (isRecoverableInteractionFailure(fc.name, errorMessage)) {
-            this.blockerEvents.push({ phase: "suspected", details: `${fc.name} failed with recoverable interaction error: ${errorMessage}` });
-            this.transcript.push(`Blocker suspected after ${fc.name} failure. Attempting blocker recovery.`);
-            const recoveryResult = await attemptBlockerRecovery(mcpClient, this.rolePrefix, this.transcript, errorMessage, this.blockerEvents);
-            this.transcript.push(`Blocker recovery outcome: ${recoveryResult.reason}`);
-            this.blockerEvents.push({ phase: "outcome", details: recoveryResult.reason });
+            this.transcript.push(`Unexpected activity suspected after ${fc.name} failure. Attempting recovery.`);
+            const recoveryResult = await attemptUnexpectedActivityRecovery(
+              mcpClient, this.rolePrefix, this.transcript, errorMessage,
+              this.blockerEvents, this.unexpectedActivityEvents, this.hasDialogTool, fc.name
+            );
+            this.transcript.push(`Recovery outcome: ${recoveryResult.reason}`);
 
             if (recoveryResult.recovered) {
               try {
@@ -412,6 +507,7 @@ export class AgentSession {
     }
 
     this.finalReport = appendBlockerSummary(this.finalReport, this.blockerEvents);
+    this.finalReport = appendUnexpectedActivitySummary(this.finalReport, this.unexpectedActivityEvents);
     this.finalReport = appendRiskRetestCoverage(this.finalReport, this.options.appContext?.historicalBugReportContext, this.transcript);
 
     return {
@@ -589,12 +685,30 @@ function isRecoverableInteractionFailure(
   toolName: string,
   errorMessage: string
 ): boolean {
-  if (toolName !== "browser_click") {
+  if (!INTERACTABLE_TOOLS.has(toolName)) {
     return false;
   }
   return BLOCKED_INTERACTION_PATTERNS.some((pattern) =>
     pattern.test(errorMessage)
   );
+}
+
+function classifyActivity(
+  snapshotText: string
+): "browser-dialog" | "permission-prompt" | "external-overlay" | "in-app-blocker" | "focus-interference" {
+  if (BROWSER_DIALOG_PATTERNS.some((p) => p.test(snapshotText))) {
+    return "browser-dialog";
+  }
+  if (PERMISSION_PROMPT_PATTERNS.some((p) => p.test(snapshotText))) {
+    return "permission-prompt";
+  }
+  if (EXTERNAL_OVERLAY_PATTERNS.some((p) => p.test(snapshotText))) {
+    return "external-overlay";
+  }
+  if (BLOCKER_HINT_PATTERNS.some((p) => p.test(snapshotText))) {
+    return "in-app-blocker";
+  }
+  return "focus-interference";
 }
 
 function parseDismissCandidates(snapshotText: string): DismissCandidate[] {
@@ -666,104 +780,179 @@ async function safeSnapshotText(mcpClient: McpClient): Promise<string> {
   return extractMcpResultText(snapshotResult);
 }
 
-async function attemptBlockerRecovery(
+async function dismissWithCandidates(
+  mcpClient: McpClient,
+  transcript: string[],
+  candidates: DismissCandidate[],
+  blockerEvents: BlockerEvent[]
+): Promise<RecoveryAttemptResult> {
+  let attempts = 0;
+  for (const candidate of candidates) {
+    if (attempts >= MAX_DISMISS_ATTEMPTS) {
+      break;
+    }
+    attempts += 1;
+    blockerEvents.push({ phase: "attempt", details: `Attempt ${attempts}: click ${candidate.label} (ref=${candidate.ref}).` });
+    transcript.push(`Dismiss attempt ${attempts}: clicking ${candidate.label} (ref=${candidate.ref}).`);
+    try {
+      await mcpClient.callTool("browser_click", { ref: candidate.ref, element: candidate.label });
+      const postSnapshot = await safeSnapshotText(mcpClient);
+      const postDetection = detectBlockers(postSnapshot);
+      if (!postDetection.blockerSuspected) {
+        return { recovered: true, reason: `Dismissed via ${candidate.label}.` };
+      }
+    } catch (candidateError) {
+      const message = candidateError instanceof Error ? candidateError.message : String(candidateError);
+      transcript.push(`Dismiss click failed for ${candidate.label} (ref=${candidate.ref}): ${message}`);
+    }
+  }
+
+  try {
+    transcript.push("Dismiss fallback: sending Escape key.");
+    await mcpClient.callTool("browser_press_key", { key: "Escape" });
+    const postEscapeSnapshot = await safeSnapshotText(mcpClient);
+    const postEscapeDetection = detectBlockers(postEscapeSnapshot);
+    if (!postEscapeDetection.blockerSuspected) {
+      return { recovered: true, reason: "Dismissed via Escape key." };
+    }
+  } catch (escapeError) {
+    const message = escapeError instanceof Error ? escapeError.message : String(escapeError);
+    transcript.push(`Escape key fallback failed: ${message}`);
+  }
+
+  return { recovered: false, reason: "Could not be dismissed. Continuing with alternate paths." };
+}
+
+async function attemptFocusRestoration(
+  mcpClient: McpClient,
+  _rolePrefix: string,
+  transcript: string[],
+  toolName: string,
+  unexpectedActivityEvents: UnexpectedActivityEvent[]
+): Promise<RecoveryAttemptResult> {
+  transcript.push("Focus interference recovery: taking snapshot to restore browser focus.");
+  try {
+    await mcpClient.callTool("browser_snapshot", {});
+    unexpectedActivityEvents.push({
+      type: "focus-interference",
+      source: toolName,
+      handled: true,
+      details: "Snapshot taken to restore browser focus after suspected OS-level interference.",
+    });
+    return { recovered: true, reason: "Focus restored via snapshot — potential OS notification interference." };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    unexpectedActivityEvents.push({
+      type: "focus-interference",
+      source: toolName,
+      handled: false,
+      details: `Focus restoration failed: ${message}`,
+    });
+    return { recovered: false, reason: `Focus restoration snapshot failed: ${message}` };
+  }
+}
+
+async function attemptUnexpectedActivityRecovery(
   mcpClient: McpClient,
   rolePrefix: string,
   transcript: string[],
   originalError: string,
-  blockerEvents: BlockerEvent[]
+  blockerEvents: BlockerEvent[],
+  unexpectedActivityEvents: UnexpectedActivityEvent[],
+  hasDialogTool: boolean,
+  toolName: string
 ): Promise<RecoveryAttemptResult> {
   let snapshotText = "";
   try {
     snapshotText = await safeSnapshotText(mcpClient);
   } catch (snapshotError) {
-    const message =
-      snapshotError instanceof Error
-        ? snapshotError.message
-        : String(snapshotError);
-    return {
-      recovered: false,
-      reason: `Could not capture snapshot for blocker recovery: ${message}`,
-    };
+    const message = snapshotError instanceof Error ? snapshotError.message : String(snapshotError);
+    return { recovered: false, reason: `Could not capture snapshot for recovery: ${message}` };
+  }
+
+  const activityType = classifyActivity(snapshotText);
+  transcript.push(`Activity classified as: ${activityType}.`);
+
+  if (activityType === "focus-interference") {
+    return attemptFocusRestoration(mcpClient, rolePrefix, transcript, toolName, unexpectedActivityEvents);
   }
 
   const detection = detectBlockers(snapshotText);
-  blockerEvents.push({
-    phase: "detected",
-    details: `${detection.reason} Candidates: ${detection.candidates.length}.`,
-  });
-  transcript.push(
-    `Blocker detection: ${detection.reason} Candidates: ${detection.candidates.length}.`
-  );
+
+  if (activityType === "browser-dialog") {
+    unexpectedActivityEvents.push({ type: "browser-dialog", source: toolName, handled: false, details: "Browser JS dialog detected." });
+    if (hasDialogTool) {
+      try {
+        transcript.push("Browser dialog recovery: calling browser_handle_dialog({ action: 'dismiss' }).");
+        await mcpClient.callTool("browser_handle_dialog", { action: "dismiss" });
+        unexpectedActivityEvents[unexpectedActivityEvents.length - 1].handled = true;
+        return { recovered: true, reason: "Browser JS dialog dismissed via browser_handle_dialog." };
+      } catch (dialogError) {
+        const message = dialogError instanceof Error ? dialogError.message : String(dialogError);
+        transcript.push(`browser_handle_dialog failed: ${message}. Falling back to Escape.`);
+      }
+    }
+    try {
+      transcript.push("Browser dialog fallback: sending Escape key.");
+      await mcpClient.callTool("browser_press_key", { key: "Escape" });
+      const postEscape = await safeSnapshotText(mcpClient);
+      if (!BROWSER_DIALOG_PATTERNS.some((p) => p.test(postEscape))) {
+        unexpectedActivityEvents[unexpectedActivityEvents.length - 1].handled = true;
+        return { recovered: true, reason: "Browser JS dialog dismissed via Escape key." };
+      }
+    } catch (escapeError) {
+      const msg = escapeError instanceof Error ? escapeError.message : String(escapeError);
+      transcript.push(`Escape fallback failed: ${msg}`);
+    }
+    return { recovered: false, reason: "Browser JS dialog could not be dismissed." };
+  }
+
+  if (activityType === "permission-prompt") {
+    unexpectedActivityEvents.push({ type: "permission-prompt", source: toolName, handled: false, details: "Browser permission prompt detected." });
+    const denyCandidates = detection.candidates.filter((c) =>
+      DENY_PERMISSION_LABELS.some((label) => c.label.toLowerCase().includes(label))
+    );
+    const orderedCandidates = [
+      ...denyCandidates,
+      ...detection.candidates.filter((c) => !denyCandidates.includes(c)),
+    ].slice(0, MAX_DISMISS_ATTEMPTS);
+    for (const candidate of orderedCandidates) {
+      try {
+        transcript.push(`Permission prompt recovery: clicking ${candidate.label} (ref=${candidate.ref}).`);
+        await mcpClient.callTool("browser_click", { ref: candidate.ref, element: candidate.label });
+        unexpectedActivityEvents[unexpectedActivityEvents.length - 1].handled = true;
+        unexpectedActivityEvents[unexpectedActivityEvents.length - 1].details = `Permission prompt dismissed via ${candidate.label}.`;
+        return { recovered: true, reason: `Permission prompt dismissed via ${candidate.label}.` };
+      } catch {
+        // try next candidate
+      }
+    }
+    return { recovered: false, reason: "Permission prompt could not be dismissed." };
+  }
+
+  if (activityType === "external-overlay") {
+    unexpectedActivityEvents.push({ type: "external-overlay", source: toolName, handled: false, details: "Third-party overlay detected." });
+    const result = await dismissWithCandidates(mcpClient, transcript, detection.candidates, blockerEvents);
+    if (result.recovered) {
+      unexpectedActivityEvents[unexpectedActivityEvents.length - 1].handled = true;
+      unexpectedActivityEvents[unexpectedActivityEvents.length - 1].details = `Third-party overlay dismissed: ${result.reason}`;
+    }
+    return result;
+  }
+
+  // in-app-blocker — preserve existing behaviour, log to blockerEvents
+  blockerEvents.push({ phase: "suspected", details: `${toolName} failed with recoverable interaction error: ${originalError}` });
+  blockerEvents.push({ phase: "detected", details: `${detection.reason} Candidates: ${detection.candidates.length}.` });
+  transcript.push(`Blocker detection: ${detection.reason} Candidates: ${detection.candidates.length}.`);
 
   if (!detection.blockerSuspected) {
-    return {
-      recovered: false,
-      reason: `Recovery skipped. Original error: ${originalError}`,
-    };
+    blockerEvents.push({ phase: "outcome", details: "Recovery skipped. No clear blocker in snapshot." });
+    return { recovered: false, reason: `Recovery skipped. Original error: ${originalError}` };
   }
 
-  let attempts = 0;
-  for (const candidate of detection.candidates) {
-    if (attempts >= MAX_DISMISS_ATTEMPTS) {
-      break;
-    }
-
-    attempts += 1;
-    blockerEvents.push({
-      phase: "attempt",
-      details: `Attempt ${attempts}: click ${candidate.label} (ref=${candidate.ref}).`,
-    });
-    transcript.push(
-      `Blocker recovery attempt ${attempts}: clicking dismiss candidate ${candidate.label} (ref=${candidate.ref}).`
-    );
-
-    try {
-      await mcpClient.callTool("browser_click", {
-        ref: candidate.ref,
-        element: candidate.label,
-      });
-      const postSnapshot = await safeSnapshotText(mcpClient);
-      const postDetection = detectBlockers(postSnapshot);
-      if (!postDetection.blockerSuspected) {
-        return {
-          recovered: true,
-          reason: `Dismissed blocker via ${candidate.label}.`,
-        };
-      }
-    } catch (candidateError) {
-      const message =
-        candidateError instanceof Error
-          ? candidateError.message
-          : String(candidateError);
-      transcript.push(
-        `Dismiss click failed for ${candidate.label} (ref=${candidate.ref}): ${message}`
-      );
-    }
-  }
-
-  try {
-    transcript.push("Blocker recovery fallback: sending Escape key.");
-    await mcpClient.callTool("browser_press_key", { key: "Escape" });
-    const postEscapeSnapshot = await safeSnapshotText(mcpClient);
-    const postEscapeDetection = detectBlockers(postEscapeSnapshot);
-    if (!postEscapeDetection.blockerSuspected) {
-      return {
-        recovered: true,
-        reason: "Dismissed blocker via Escape key.",
-      };
-    }
-  } catch (escapeError) {
-    const message =
-      escapeError instanceof Error ? escapeError.message : String(escapeError);
-    transcript.push(`Escape key fallback failed: ${message}`);
-  }
-
-  console.log(`${rolePrefix} Blocker recovery exhausted without success.`);
-  return {
-    recovered: false,
-    reason: "Blocker could not be dismissed. Continuing with alternate paths.",
-  };
+  const inAppResult = await dismissWithCandidates(mcpClient, transcript, detection.candidates, blockerEvents);
+  blockerEvents.push({ phase: "outcome", details: inAppResult.reason });
+  return inAppResult;
 }
 
 function buildSystemPrompt(
@@ -800,6 +989,15 @@ function buildSystemPrompt(
 - Use this context where relevant, but prioritize observed UI behavior and tool outputs.
 
 ${truncateResult(appContext.content, 12000)}`;
+  }
+
+  if (appContext?.testingScopeContent) {
+    prompt += `
+
+## Testing Scope
+- These directives define what to focus on or skip during this run. Follow them precisely to avoid wasting effort on areas already covered elsewhere.
+
+${truncateResult(appContext.testingScopeContent, 4000)}`;
   }
 
   if (appContext?.historicalBugReportContext) {
@@ -868,6 +1066,44 @@ function appendBlockerSummary(
   if (uniqueDetectionReasons) {
     summaryLines.push("- Detection signals:");
     summaryLines.push(uniqueDetectionReasons);
+  }
+
+  return `${reportText.trim()}\n\n${summaryLines.join("\n")}`;
+}
+
+function appendUnexpectedActivitySummary(
+  reportText: string,
+  events: UnexpectedActivityEvent[]
+): string {
+  if (events.length === 0) {
+    return reportText;
+  }
+
+  const byType: Record<string, UnexpectedActivityEvent[]> = {
+    "browser-dialog": events.filter((e) => e.type === "browser-dialog"),
+    "permission-prompt": events.filter((e) => e.type === "permission-prompt"),
+    "external-overlay": events.filter((e) => e.type === "external-overlay"),
+    "focus-interference": events.filter((e) => e.type === "focus-interference"),
+  };
+
+  const handledCount = events.filter((e) => e.handled).length;
+  const unhandledCount = events.length - handledCount;
+
+  const summaryLines = [
+    "## Unexpected Activity Summary",
+    `- Total unexpected activity events: ${events.length}`,
+    `- Handled: ${handledCount} | Unhandled: ${unhandledCount}`,
+  ];
+
+  for (const [type, typeEvents] of Object.entries(byType)) {
+    if (typeEvents.length > 0) {
+      summaryLines.push(`- ${type}: ${typeEvents.length} (${typeEvents.filter((e) => e.handled).length} handled)`);
+    }
+  }
+
+  summaryLines.push("- Detail:");
+  for (const event of events) {
+    summaryLines.push(`  - [${event.handled ? "HANDLED" : "UNHANDLED"}] ${event.type} (triggered by ${event.source}): ${event.details}`);
   }
 
   return `${reportText.trim()}\n\n${summaryLines.join("\n")}`;

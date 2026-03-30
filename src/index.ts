@@ -87,6 +87,7 @@ interface IssueFinding {
   roleName: string;
   severity: "Critical" | "High" | "Medium" | "Low";
   summary: string;
+  isAgentIssue?: boolean;
 }
 
 interface GithubIssueTrackerConfig {
@@ -975,24 +976,30 @@ function extractIssueFindings(
   const findings: IssueFinding[] = [];
   const lines = finalReport.split(/\r?\n/);
   for (const line of lines) {
-    const match = line.match(
+    // Match real app severity levels
+    const appMatch = line.match(
       /^\s*-\s*\*\*(Critical|High|Medium|Low)\*\*:\s*(.+)\s*$/i
     );
-    if (!match) {
+    if (appMatch) {
+      const severity =
+        (appMatch[1].charAt(0).toUpperCase() +
+          appMatch[1].slice(1).toLowerCase()) as IssueFinding["severity"];
+      const summary = appMatch[2].trim();
+      if (summary) {
+        findings.push({ roleName, severity, summary });
+      }
       continue;
     }
-    const severity =
-      (match[1].charAt(0).toUpperCase() +
-        match[1].slice(1).toLowerCase()) as IssueFinding["severity"];
-    const summary = match[2].trim();
-    if (!summary) {
-      continue;
+    // Match agent/infrastructure issues
+    const agentMatch = line.match(
+      /^\s*-\s*\*\*Agent Issue\*\*:\s*(.+)\s*$/i
+    );
+    if (agentMatch) {
+      const summary = agentMatch[1].trim();
+      if (summary) {
+        findings.push({ roleName, severity: "Low", summary, isAgentIssue: true });
+      }
     }
-    findings.push({
-      roleName,
-      severity,
-      summary,
-    });
   }
   return findings;
 }
@@ -1137,7 +1144,9 @@ async function logIssuesToGithub(params: {
     const labels = [
       ...(config.labels ?? []),
       "exploratory-testing",
-      severityLabel(finding.severity),
+      ...(finding.isAgentIssue
+        ? ["agent-issue"]
+        : [severityLabel(finding.severity)]),
       `role:${finding.roleName.toLowerCase()}`,
     ];
 
