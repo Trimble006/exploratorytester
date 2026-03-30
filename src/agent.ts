@@ -991,7 +991,10 @@ function buildSystemPrompt(
     prompt += `
 
 ## Application Context (Provided)
-- Use this context where relevant, but prioritize observed UI behavior and tool outputs.
+- This context defines the role's capabilities and the features available to them.
+- Treat every capability listed as something that MUST be tested. Derive test scenarios directly from this context — if a capability is listed, exercise it.
+- Use your judgment to identify both happy-path and edge-case scenarios for each capability.
+- Prioritize observed UI behavior and tool outputs over assumptions, but do not skip a capability simply because it isn't immediately visible.
 
 ${truncateResult(appContext.content, 12000)}`;
   }
