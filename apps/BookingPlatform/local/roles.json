@@ -5,8 +5,11 @@
       "identifierType": "email",
       "identifier": "admin@wlbooking.com",
       "password": "admin123",
-      "contextFile": "",
-      "historicalBugReportsFile": ""
+      "contextFile": "apps/BookingPlatform/local/context/admin-context.md",
+      "historicalBugReportsFile": "",
+      "testingScopeFile": "",
+      "model": "",
+      "maxIterations": 0
     },
     {
       "name": "tenant admin",
@@ -14,15 +17,32 @@
       "identifier": "admin@lakeview.club",
       "password": "club123",
       "contextFile": "",
-      "historicalBugReportsFile": ""
+      "historicalBugReportsFile": "",
+      "testingScopeFile": "",
+      "model": "",
+      "maxIterations": 0
     },
     {
       "name": "user",
       "identifierType": "email",
       "identifier": "user@lakeview.club",
       "password": "user123",
-      "contextFile": "",
-      "historicalBugReportsFile": ""
+      "contextFile": "apps/BookingPlatform/local/context/member-context.md",
+      "historicalBugReportsFile": "",
+      "testingScopeFile": "",
+      "model": "",
+      "maxIterations": 0
+    },
+    {
+      "name": "maintenance",
+      "identifierType": "email",
+      "identifier": "maint@lakeview.club",
+      "password": "user123",
+      "contextFile": "apps/BookingPlatform/local/context/maintenance-context.md",
+      "historicalBugReportsFile": "",
+      "testingScopeFile": "",
+      "model": "",
+      "maxIterations": 0
     }
   ]
 }

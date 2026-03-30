@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { FunctionDeclaration, FunctionDeclarationSchema } from "@google/generative-ai";
@@ -24,9 +25,9 @@ export class McpClient {
         : undefined;
 
     this.transport = new StdioClientTransport({
-      command: "npx",
+      command: "node",
       args: [
-        "@playwright/mcp@latest",
+        join(process.cwd(), "node_modules", "@playwright", "mcp", "cli.js"),
         "--browser", "chromium",
         "--user-data-dir", workingDir ?? "",
       ],
