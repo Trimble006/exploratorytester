@@ -70,6 +70,9 @@ interface RoleConfig {
   testCredentials?: TestCredentials;
   contextFile?: string;
   historicalBugReportsFile?: string;
+  testingScopeFile?: string;
+  maxIterations?: number;
+  model?: string;
 }
 
 interface RoleExecutionOutcome {
@@ -117,6 +120,7 @@ interface AppProfileDefaults {
   issueTrackerConfigFile?: string;
   appContextFile?: string;
   historicalBugReportsFile?: string;
+  testingScopeFile?: string;
   environmentsConfigFile?: string;
   environments?: EnvironmentsConfig;
   resultsDir?: string;
@@ -205,6 +209,157 @@ async function tryResolveExistingFile(filePath: string): Promise<string | undefi
   }
 }
 
+async function appFolderExists(appName: string, appProfile: string): Promise<boolean> {
+  try {
+    await access(join("apps", appName, appProfile));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Role config entry shape used during scaffold validation
+// ---------------------------------------------------------------------------
+interface ScaffoldRoleEntry {
+  name: string;
+  identifierType?: string;
+  identifier?: string;
+  email?: string;
+  username?: string;
+  password: string;
+}
+
+async function scaffoldAppProfile(
+  appName: string,
+  appProfile: string,
+  overrides: import("./issue-ops.js").IssueBodyOverrides
+): Promise<void> {
+  // ── Validate roleConfig ──
+  const rawRoles = overrides.roleConfig as unknown[];
+  const validatedRoles: ScaffoldRoleEntry[] = [];
+  for (let i = 0; i < rawRoles.length; i++) {
+    const r = rawRoles[i];
+    if (!r || typeof r !== "object") {
+      throw new Error(`scaffoldAppProfile: roleConfig[${i}] must be an object.`);
+    }
+    const entry = r as Record<string, unknown>;
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (!name) {
+      throw new Error(`scaffoldAppProfile: roleConfig[${i}] is missing a "name" field.`);
+    }
+    const hasIdentifier =
+      typeof entry.email === "string" ||
+      typeof entry.username === "string" ||
+      (typeof entry.identifierType === "string" && typeof entry.identifier === "string");
+    if (!hasIdentifier) {
+      throw new Error(
+        `scaffoldAppProfile: role "${name}" needs an identifier. ` +
+        `Provide "email", "username", or "identifierType"+"identifier".`
+      );
+    }
+    if (typeof entry.password !== "string" || !entry.password) {
+      throw new Error(`scaffoldAppProfile: role "${name}" is missing a "password" field.`);
+    }
+
+    // Sanitise — only write known fields
+    const sanitised: ScaffoldRoleEntry = { name, password: entry.password as string };
+    if (typeof entry.identifierType === "string" && typeof entry.identifier === "string") {
+      sanitised.identifierType = entry.identifierType;
+      sanitised.identifier = entry.identifier;
+    } else if (typeof entry.email === "string") {
+      sanitised.email = entry.email;
+    } else if (typeof entry.username === "string") {
+      sanitised.username = entry.username;
+    }
+    if (typeof entry.contextFile === "string") {
+      (sanitised as unknown as Record<string, unknown>).contextFile = entry.contextFile;
+    }
+    validatedRoles.push(sanitised);
+  }
+
+  const appRootDir = join("apps", appName, appProfile);
+  const contextDir = join(appRootDir, "context");
+  await mkdir(contextDir, { recursive: true });
+
+  // ── roles.json ──
+  await writeFile(
+    join(appRootDir, "roles.json"),
+    JSON.stringify({ roles: validatedRoles }, null, 2) + "\n",
+    "utf-8"
+  );
+  console.log(`  [scaffold] wrote roles.json (${validatedRoles.length} role(s))`);
+
+  // ── environments.json ──
+  const envName = typeof overrides.environment === "string" ? overrides.environment : "default";
+  const envUrl = overrides.targetUrl as string;
+  await writeFile(
+    join(appRootDir, "environments.json"),
+    JSON.stringify(
+      { default: envName, environments: { [envName]: envUrl } },
+      null,
+      2
+    ) + "\n",
+    "utf-8"
+  );
+  console.log(`  [scaffold] wrote environments.json (env: ${envName} → ${envUrl})`);
+
+  // ── context/app-context.md ──
+  const appContextContent =
+    typeof overrides.appContext === "string" && overrides.appContext.trim()
+      ? overrides.appContext.trim()
+      : `# App Context\n\n> Auto-scaffolded from issue. Update this file with application details.\n`;
+  await writeFile(join(contextDir, "app-context.md"), appContextContent, "utf-8");
+  console.log(`  [scaffold] wrote context/app-context.md`);
+
+  // ── context/historical-bugs.md ──
+  const historicalBugsContent =
+    typeof overrides.historicalBugs === "string" && overrides.historicalBugs.trim()
+      ? overrides.historicalBugs.trim()
+      : `# Historical Bug Reports\n\n> Auto-scaffolded. Add known bugs here.\n`;
+  await writeFile(join(contextDir, "historical-bugs.md"), historicalBugsContent, "utf-8");
+  console.log(`  [scaffold] wrote context/historical-bugs.md`);
+
+  // ── issue-tracker.github.json (optional) ──
+  const rawTracker = overrides.issueTracker;
+  if (rawTracker && typeof rawTracker === "object") {
+    const tracker = rawTracker as Record<string, unknown>;
+    if (typeof tracker.repo === "string" && tracker.repo.includes("/")) {
+      if (tracker.provider !== undefined && tracker.provider !== "github") {
+        console.warn(
+          `  [scaffold] issueTracker.provider "${tracker.provider}" is not supported — skipping issue-tracker.github.json`
+        );
+      } else {
+        const trackerConfig = {
+          provider: "github",
+          enabled: typeof tracker.enabled === "boolean" ? tracker.enabled : true,
+          repo: tracker.repo,
+          tokenEnv: typeof tracker.tokenEnv === "string" ? tracker.tokenEnv : "GITHUB_TOKEN",
+          labels: Array.isArray(tracker.labels) ? tracker.labels.filter((l) => typeof l === "string") : undefined,
+          titlePrefix: typeof tracker.titlePrefix === "string" ? tracker.titlePrefix : undefined,
+          dedupeByTitle: typeof tracker.dedupeByTitle === "boolean" ? tracker.dedupeByTitle : true,
+          dryRun: typeof tracker.dryRun === "boolean" ? tracker.dryRun : false,
+        };
+        // Remove undefined fields before writing
+        const trackerOut: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(trackerConfig)) {
+          if (v !== undefined) trackerOut[k] = v;
+        }
+        await writeFile(
+          join(appRootDir, "issue-tracker.github.json"),
+          JSON.stringify(trackerOut, null, 2) + "\n",
+          "utf-8"
+        );
+        console.log(`  [scaffold] wrote issue-tracker.github.json (repo: ${tracker.repo})`);
+      }
+    } else {
+      console.warn(
+        `  [scaffold] issueTracker.repo is missing or not in owner/repo format — skipping issue-tracker.github.json`
+      );
+    }
+  }
+}
+
 async function getMostRecentIssues(resultsDir: string, host: string): Promise<string | undefined> {
   const hostDir = join(resultsDir, host);
   try {
@@ -270,12 +425,14 @@ async function resolveAppProfileDefaults(): Promise<AppProfileDefaults> {
     issueTrackerConfigFile,
     appContextFile,
     historicalBugReportsFile,
+    testingScopeFile,
     environmentsConfigFile,
   ] = await Promise.all([
     tryResolveExistingFile(join(appRootDir, "roles.json")),
     tryResolveExistingFile(join(appRootDir, "issue-tracker.github.json")),
     tryResolveExistingFile(join(appRootDir, "context", "app-context.md")),
     tryResolveExistingFile(join(appRootDir, "context", "historical-bugs.md")),
+    tryResolveExistingFile(join(appRootDir, "context", "testing-scope.md")),
     tryResolveExistingFile(join(appRootDir, "environments.json")),
   ]);
 
@@ -304,6 +461,7 @@ async function resolveAppProfileDefaults(): Promise<AppProfileDefaults> {
     issueTrackerConfigFile,
     appContextFile,
     historicalBugReportsFile,
+    testingScopeFile,
     environmentsConfigFile,
     environments,
     resultsDir: join(appRootDir, "outputs"),
@@ -479,6 +637,9 @@ async function parseRolesFromJson(filePath: string): Promise<RoleConfig[]> {
       password?: string;
       contextFile?: string;
       historicalBugReportsFile?: string;
+      testingScopeFile?: string;
+      maxIterations?: number;
+      model?: string;
     };
 
     const name = roleObj.name?.trim();
@@ -529,6 +690,11 @@ async function parseRolesFromJson(filePath: string): Promise<RoleConfig[]> {
       contextFile: roleObj.contextFile?.trim() || undefined,
       historicalBugReportsFile:
         roleObj.historicalBugReportsFile?.trim() || undefined,
+      testingScopeFile: roleObj.testingScopeFile?.trim() || undefined,
+      maxIterations: typeof roleObj.maxIterations === "number" && roleObj.maxIterations > 0
+        ? roleObj.maxIterations
+        : undefined,
+      model: roleObj.model?.trim() || undefined,
     });
   }
 
@@ -667,11 +833,31 @@ async function readHistoricalBugReportsFile(
   };
 }
 
+async function readTestingScopeFile(
+  filePath: string
+): Promise<{ sourceFile: string; content: string } | undefined> {
+  const resolvedFile = resolve(filePath);
+  try {
+    await access(resolvedFile);
+  } catch {
+    return undefined;
+  }
+  try {
+    const content = (await readFile(resolvedFile, "utf-8")).trim();
+    if (!content) return undefined;
+    return { sourceFile: resolvedFile, content: content.slice(0, 4000) };
+  } catch {
+    console.warn(`Warning: could not read testing scope file: ${resolvedFile}`);
+    return undefined;
+  }
+}
+
 async function resolveRoleAppContext(
   contextFile?: string,
   historicalBugReportsFile?: string,
   appVersion?: string,
-  recentIssuesContext?: string
+  recentIssuesContext?: string,
+  testingScopeFile?: string
 ): Promise<AppContext> {
   const appContext = await resolveAppContext(contextFile);
   appContext.appVersion = appVersion;
@@ -692,10 +878,22 @@ async function resolveRoleAppContext(
     bugReportsContent = bugReportsContent.trim();
   }
 
+  let testingScopeContent: string | undefined;
+  let testingScopeSourceFile: string | undefined;
+
+  if (testingScopeFile) {
+    const scope = await readTestingScopeFile(testingScopeFile);
+    if (scope) {
+      testingScopeContent = scope.content;
+      testingScopeSourceFile = scope.sourceFile;
+    }
+  }
+
   return {
     ...appContext,
     ...(bugReportsSourceFile ? { historicalBugReportSourceFile: bugReportsSourceFile } : {}),
     ...(bugReportsContent ? { historicalBugReportContext: bugReportsContent } : {}),
+    ...(testingScopeContent ? { testingScopeContent, testingScopeSourceFile } : {}),
   };
 }
 
@@ -1298,6 +1496,44 @@ async function main(): Promise<void> {
     }
   }
 
+  // ── Auto-scaffold: create app profile folder from issue data if it doesn't exist ──
+  if (issueParams && envValue("APP_UNDER_TEST")) {
+    const scaffoldAppName = normalizeAppKey(process.env.APP_UNDER_TEST!);
+    const scaffoldProfile = normalizeAppKey(process.env.APP_PROFILE ?? "default");
+
+    if (scaffoldAppName && !(await appFolderExists(scaffoldAppName, scaffoldProfile))) {
+      const { roleConfig, targetUrl: scaffoldUrl } = issueParams.overrides;
+
+      if (!Array.isArray(roleConfig) || roleConfig.length === 0) {
+        console.error(
+          `App profile "apps/${scaffoldAppName}/${scaffoldProfile}/" was not found.`
+        );
+        console.error(
+          `To auto-scaffold it from this issue, add a "roleConfig" array to the JSON block in the issue body.`
+        );
+        process.exit(1);
+      }
+
+      if (!scaffoldUrl || typeof scaffoldUrl !== "string") {
+        console.error(
+          `App profile "apps/${scaffoldAppName}/${scaffoldProfile}/" was not found.`
+        );
+        console.error(
+          `To auto-scaffold it from this issue, add a "targetUrl" to the JSON block in the issue body.`
+        );
+        process.exit(1);
+      }
+
+      console.log(
+        `IssueOps: app profile "apps/${scaffoldAppName}/${scaffoldProfile}/" not found — auto-scaffolding...`
+      );
+      await scaffoldAppProfile(scaffoldAppName, scaffoldProfile, issueParams.overrides);
+      console.log(
+        `IssueOps: scaffold complete. Continuing with test run.`
+      );
+    }
+  }
+
   // ── Resolve target URL ──
   // Priority: issue explicit URL > CLI positional arg > issue environment name > default environment
   const appProfileDefaults = await resolveAppProfileDefaults();
@@ -1345,7 +1581,7 @@ async function main(): Promise<void> {
   const model = process.env.GEMINI_MODEL ?? "gemini-2.0-flash";
   const maxIterations = parseInt(process.env.MAX_ITERATIONS ?? "50", 10);
 
-  const resultsBaseDir = process.env.RESULTS_DIR?.trim() || appProfileDefaults.resultsDir || "results";
+  const resultsBaseDir = resolve(process.env.RESULTS_DIR?.trim() || appProfileDefaults.resultsDir || "results");
   const recentIssues = await getMostRecentIssues(resultsBaseDir, safeHostForFilename(targetUrl));
   if (recentIssues) {
     appProfileDefaults.recentIssuesContext = recentIssues;
@@ -1444,16 +1680,22 @@ async function main(): Promise<void> {
             role.contextFile,
             role.historicalBugReportsFile,
             appProfileDefaults.appVersion,
-            appProfileDefaults.recentIssuesContext
+            appProfileDefaults.recentIssuesContext,
+            role.testingScopeFile ?? appProfileDefaults.testingScopeFile
           );
-          
+
+          const roleMaxIterations = role.maxIterations ?? maxIterations;
+          const roleModel = role.model ?? model;
+          if (role.maxIterations) console.log(`[${role.name}] maxIterations override: ${role.maxIterations}`);
+          if (role.model) console.log(`[${role.name}] model override: ${role.model}`);
+
           const session = new AgentSession({
             apiKey,
-            model,
+            model: roleModel,
             mcpClient,
             roleName: role.name,
             targetUrl,
-            maxIterations,
+            maxIterations: roleMaxIterations,
             testCredentials: role.testCredentials,
             appContext,
           });
@@ -1539,15 +1781,20 @@ async function main(): Promise<void> {
               role.contextFile,
               role.historicalBugReportsFile,
               appProfileDefaults.appVersion,
-              appProfileDefaults.recentIssuesContext
+              appProfileDefaults.recentIssuesContext,
+              role.testingScopeFile ?? appProfileDefaults.testingScopeFile
             );
+            const roleMaxIterations = role.maxIterations ?? maxIterations;
+            const roleModel = role.model ?? model;
+            if (role.maxIterations) console.log(`[${role.name}] maxIterations override: ${role.maxIterations}`);
+            if (role.model) console.log(`[${role.name}] model override: ${role.model}`);
             const result = await runAgent({
               apiKey,
-              model,
+              model: roleModel,
               mcpClient,
               roleName: role.name,
               targetUrl,
-              maxIterations,
+              maxIterations: roleMaxIterations,
               testCredentials: role.testCredentials,
               appContext,
             });
