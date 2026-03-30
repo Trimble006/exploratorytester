@@ -58,7 +58,7 @@
   <div class="header">
     <div>
       <h1>🧪 Explorer Cost Dashboard</h1>
-      <div class="header-meta">Generated 2026-03-30T08:21:15.789Z · Prices approx (Gemini 2.0 Flash: $0.075/1M input, $0.30/1M output) · <a href="https://ai.google.dev/pricing" target="_blank">Verify at ai.google.dev/pricing</a></div>
+      <div class="header-meta">Generated 2026-03-30T08:26:55.600Z · Prices approx (Gemini 2.0 Flash: $0.075/1M input, $0.30/1M output) · <a href="https://ai.google.dev/pricing" target="_blank">Verify at ai.google.dev/pricing</a></div>
     </div>
   </div>
 
@@ -83,8 +83,8 @@
     </div>
     <div class="kpi">
       <div class="kpi-label">Apps Tested</div>
-      <div class="kpi-val">2</div>
-      <div class="kpi-sub">localhost:3000, bookingplatform</div>
+      <div class="kpi-val">1</div>
+      <div class="kpi-sub">bookingplatform</div>
     </div>
   </div>
 
@@ -93,7 +93,7 @@
     <h2>Cost per Run</h2>
     <div class="spark-row">
     <div class="spark-block">
-      <div class="spark-label">unknown</div>
+      <div class="spark-label">BookingPlatform</div>
       <svg width="65" height="44" style="display:block">
         <rect x="0" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T06-57-59-065Z: $0.0013"/><rect x="13" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-03-45-906Z: $0.0019"/><rect x="26" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-08-29-337Z: $0.0021"/><rect x="39" y="38" width="10" height="2" rx="2" fill="#6366f1" title="2026-03-30T07-10-05-707Z: $0.0030"/><rect x="52" y="5" width="10" height="35" rx="2" fill="#6366f1" title="2026-03-30T07-20-11-516Z: $0.0473"/>
       </svg>
@@ -127,24 +127,14 @@
       </thead>
       <tbody>
     <tr>
-      <td class="bold">localhost:3000</td>
-      <td class="num">5</td>
-      <td class="num">17</td>
-      <td class="num">708,797</td>
-      <td class="num">7,605</td>
-      <td class="num bold">716,402</td>
-      <td class="num cost-cell">$0.0554</td>
-      <td><svg width="120" height="16" style="vertical-align:middle"><rect width="120" height="16" rx="3" fill="#e5e7eb"/><rect width="120" height="16" rx="3" fill="#6366f1"/></svg> <span class="dim">localhost:3000</span></td>
-    </tr>
-    <tr>
       <td class="bold">bookingplatform</td>
-      <td class="num">1</td>
-      <td class="num">4</td>
-      <td class="num">694,608</td>
-      <td class="num">6,175</td>
-      <td class="num bold">700,783</td>
-      <td class="num cost-cell">$0.0539</td>
-      <td><svg width="120" height="16" style="vertical-align:middle"><rect width="120" height="16" rx="3" fill="#e5e7eb"/><rect width="117" height="16" rx="3" fill="#6366f1"/></svg> <span class="dim">localhost:3000</span></td>
+      <td class="num">6</td>
+      <td class="num">21</td>
+      <td class="num">1,403,405</td>
+      <td class="num">13,780</td>
+      <td class="num bold">1,417,185</td>
+      <td class="num cost-cell">$0.1094</td>
+      <td><svg width="120" height="16" style="vertical-align:middle"><rect width="120" height="16" rx="3" fill="#e5e7eb"/><rect width="120" height="16" rx="3" fill="#6366f1"/></svg> <span class="dim">localhost:3000</span></td>
     </tr></tbody>
     </table>
   </div>
@@ -156,7 +146,7 @@
       <input type="search" id="run-filter" placeholder="Filter by run ID / app…" oninput="filterRuns(this.value)" style="width:280px">
       <select id="app-filter" onchange="filterRuns(document.getElementById('run-filter').value)">
         <option value="">All apps</option>
-        <option value="localhost:3000">localhost:3000</option><option value="bookingplatform">bookingplatform</option>
+        <option value="bookingplatform">bookingplatform</option>
       </select>
     </div>
     <table id="run-table">
@@ -218,7 +208,7 @@
       </td>
     </tr>
     <tr class="run-header" onclick="toggle('run-detail-1')">
-      <td><span class="chevron" id="chev-run-detail-1">▶</span> <code class="ts">2026-03-30T07-20-11-516Z</code>  </td>
+      <td><span class="chevron" id="chev-run-detail-1">▶</span> <code class="ts">2026-03-30T07-20-11-516Z</code> <span class="tag">BookingPlatform</span> </td>
       <td class="dim">localhost:3000</td>
       <td class="num">4</td>
       <td class="num">611,994</td>
@@ -263,7 +253,7 @@
       </td>
     </tr>
     <tr class="run-header" onclick="toggle('run-detail-2')">
-      <td><span class="chevron" id="chev-run-detail-2">▶</span> <code class="ts">2026-03-30T07-10-05-707Z</code>  </td>
+      <td><span class="chevron" id="chev-run-detail-2">▶</span> <code class="ts">2026-03-30T07-10-05-707Z</code> <span class="tag">BookingPlatform</span> </td>
       <td class="dim">localhost:3000</td>
       <td class="num">4</td>
       <td class="num">35,865</td>
@@ -308,7 +298,7 @@
       </td>
     </tr>
     <tr class="run-header" onclick="toggle('run-detail-3')">
-      <td><span class="chevron" id="chev-run-detail-3">▶</span> <code class="ts">2026-03-30T07-08-29-337Z</code>  </td>
+      <td><span class="chevron" id="chev-run-detail-3">▶</span> <code class="ts">2026-03-30T07-08-29-337Z</code> <span class="tag">BookingPlatform</span> </td>
       <td class="dim">localhost:3000</td>
       <td class="num">4</td>
       <td class="num">24,282</td>
@@ -353,7 +343,7 @@
       </td>
     </tr>
     <tr class="run-header" onclick="toggle('run-detail-4')">
-      <td><span class="chevron" id="chev-run-detail-4">▶</span> <code class="ts">2026-03-30T07-03-45-906Z</code>  </td>
+      <td><span class="chevron" id="chev-run-detail-4">▶</span> <code class="ts">2026-03-30T07-03-45-906Z</code> <span class="tag">BookingPlatform</span> </td>
       <td class="dim">localhost:3000</td>
       <td class="num">4</td>
       <td class="num">21,507</td>
@@ -398,7 +388,7 @@
       </td>
     </tr>
     <tr class="run-header" onclick="toggle('run-detail-5')">
-      <td><span class="chevron" id="chev-run-detail-5">▶</span> <code class="ts">2026-03-30T06-57-59-065Z</code>  </td>
+      <td><span class="chevron" id="chev-run-detail-5">▶</span> <code class="ts">2026-03-30T06-57-59-065Z</code> <span class="tag">BookingPlatform</span> </td>
       <td class="dim">localhost:3000</td>
       <td class="num">1</td>
       <td class="num">15,149</td>

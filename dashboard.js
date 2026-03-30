@@ -57,12 +57,28 @@ function findLogFiles(baseDir) {
   return results;
 }
 
+function inferAppFromPath(filePath) {
+  // apps/<app>/<profile>/outputs/token-usage.ndjson
+  const parts = filePath.replace(/\\/g, "/").split("/");
+  const idx = parts.indexOf("apps");
+  if (idx !== -1 && parts[idx + 1] && parts[idx + 2]) {
+    return { app: parts[idx + 1], profile: parts[idx + 2] };
+  }
+  return { app: null, profile: null };
+}
+
 function readEntries(filePath) {
+  const inferred = inferAppFromPath(filePath);
   try {
     return fs.readFileSync(filePath, "utf-8")
       .split("\n").filter(Boolean)
       .map(line => { try { return JSON.parse(line); } catch { return null; } })
-      .filter(Boolean);
+      .filter(Boolean)
+      .map(e => ({
+        ...e,
+        app:     e.app     || inferred.app     || null,
+        profile: e.profile || inferred.profile || null,
+      }));
   } catch { return []; }
 }
 
@@ -133,7 +149,7 @@ for (const e of entries) {
 // ---------------------------------------------------------------------------
 const byApp = new Map();
 for (const e of entries) {
-  const appKey = e.app || (() => { try { return new URL(e.url).host; } catch { return e.url; } })();
+  const appKey = (e.app || (() => { try { return new URL(e.url).host; } catch { return e.url; } })()).toLowerCase();
   if (!byApp.has(appKey)) {
     byApp.set(appKey, { app: appKey, prompt: 0, output: 0, cached: 0, total: 0, cost: 0, runIds: new Set(), roleExecs: 0, envs: new Set() });
   }
